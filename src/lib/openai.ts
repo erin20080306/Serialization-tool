@@ -3,7 +3,7 @@ import {
   SchemaType,
   type ResponseSchema,
 } from '@google/generative-ai';
-import { buildDataProfile, formatDataProfileForPrompt } from './data-profile';
+import { buildDataProfile, formatDataProfileForPrompt, type DataProfile } from './data-profile';
 
 // 使用 Google Gemini 作為 AI 後端
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -65,6 +65,74 @@ function stripCodeFence(text: string): string {
   }
 
   return trimmed;
+}
+
+function looksIncompleteAnalysis(text: string) {
+  const trimmed = text.trim();
+  return (
+    trimmed.length < 180 ||
+    trimmed.endsWith('**') ||
+    !trimmed.includes('**一句話結論**') ||
+    !trimmed.includes('**關鍵數字**')
+  );
+}
+
+function buildDeterministicAnalysis(
+  profile: DataProfile,
+  userQuestion?: string
+) {
+  const numericColumns = profile.columns.filter((column) => column.numeric).slice(0, 4);
+  const rankedMetrics = profile.categoryMetrics.slice(0, 4);
+  const focusRows = userQuestion
+    ? profile.categoryMetrics
+        .flatMap((metric) =>
+          metric.topRows
+            .filter((row) => userQuestion.includes(row.value))
+            .map((row) => ({
+              categoryColumn: metric.categoryColumn,
+              metricColumn: metric.metricColumn,
+              ...row,
+            }))
+        )
+        .slice(0, 5)
+    : [];
+
+  const conclusion =
+    focusRows.length > 0
+      ? `${focusRows[0].value} 在「${focusRows[0].metricColumn}」的分組總計為 ${focusRows[0].total.toLocaleString()}，可作為本次問題的主要判斷依據。`
+      : `這份資料共有 ${profile.rowCount.toLocaleString()} 筆、${profile.columnCount} 個欄位；主要可從數值欄位與分類排行切入分析。`;
+
+  const keyNumbers = [
+    ...numericColumns.map(
+      (column) =>
+        `- 「${column.name}」總計 ${column.numeric?.sum.toLocaleString()}，平均 ${column.numeric?.average.toLocaleString()}，範圍 ${column.numeric?.min.toLocaleString()} 到 ${column.numeric?.max.toLocaleString()}。`
+    ),
+    ...rankedMetrics.slice(0, 2).map((metric) => {
+      const top = metric.topRows[0];
+      return top
+        ? `- 以「${metric.categoryColumn}」分組看「${metric.metricColumn}」，最高為「${top.value}」：${top.total.toLocaleString()}。`
+        : '';
+    }),
+    ...focusRows.map(
+      (row) =>
+        `- 問題提到的「${row.value}」在「${row.categoryColumn}/${row.metricColumn}」總計 ${row.total.toLocaleString()}，筆數 ${row.count}。`
+    ),
+  ].filter(Boolean);
+
+  return `**一句話結論**
+- ${conclusion}
+
+**關鍵數字**
+${keyNumbers.slice(0, 6).join('\n') || '- 目前資料缺少可計算的數值欄位，建議補上金額、數量、成本或日期欄位。'}
+
+**異常與風險**
+- 目前可先檢查最高分組是否由少數筆數支撐；若筆數很少但總額很高，可能是大單、輸入錯誤或單價異常。
+- 若要更精準判斷風險，建議加入成本、客戶、單價、折扣或狀態欄位。
+
+**下一步建議**
+- 先針對最高分組做明細下鑽，確認主要貢獻來源。
+- 將數值欄位按日期或分類做趨勢比較，找出成長或下滑區間。
+- 對高金額或高數量資料列做人工抽查，確認是否有異常交易。`;
 }
 
 const stringArraySchema: ResponseSchema = {
@@ -152,7 +220,10 @@ ${JSON.stringify(sampleData, null, 2)}
       temperature: 0.35,
       maxOutputTokens: 1400,
     });
-    return text || '無法產生分析結果';
+    if (!text || looksIncompleteAnalysis(text)) {
+      return buildDeterministicAnalysis(profile, userQuestion);
+    }
+    return text;
   } catch (error) {
     console.error('Gemini API error:', error);
     throw new Error('AI 分析失敗，請稍後再試');

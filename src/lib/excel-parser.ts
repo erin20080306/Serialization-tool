@@ -6,8 +6,9 @@ export async function parseExcelFile(
   file: File
 ): Promise<{ data: ParsedData[]; fileName: string }> {
   try {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data, { type: 'array' });
+    const isCsv = file.name.toLowerCase().endsWith('.csv') || file.type.includes('csv');
+    const data = isCsv ? await file.text() : await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: isCsv ? 'string' : 'array' });
 
     const parsedData: ParsedData[] = [];
 
