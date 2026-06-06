@@ -117,7 +117,7 @@ export default function AnalyzePage() {
         body: JSON.stringify({
           question: userMsg,
           columns: data.columns,
-          rows: data.rows.slice(0, 500),
+          rows: data.rows,
         }),
       });
 
@@ -168,7 +168,9 @@ export default function AnalyzePage() {
       .slice(0, 10) ?? [];
 
   return (
-    <div className="h-full flex flex-col gap-6">
+    <div className="h-full grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-6">
+      {/* Left column: summary + data preview (scrollable) */}
+      <div className="flex flex-col gap-6 min-h-0 lg:overflow-y-auto lg:pr-1">
       <Card className="border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -250,9 +252,8 @@ export default function AnalyzePage() {
         )}
       </Card>
 
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
-      {/* Left: Data Preview */}
-      <Card className="flex-1 flex flex-col overflow-hidden border-slate-200">
+      {/* Data Preview */}
+      <Card className="flex-1 min-h-[280px] flex flex-col overflow-hidden border-slate-200">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-slate-500" />
@@ -287,9 +288,10 @@ export default function AnalyzePage() {
           </table>
         </div>
       </Card>
+      </div>
 
-      {/* Right: AI Chat */}
-      <Card className="w-full lg:w-[400px] flex flex-col overflow-hidden border-indigo-100 shadow-md">
+      {/* Right column: AI Chat (full height, not pushed down by summary) */}
+      <Card className="flex flex-col overflow-hidden border-indigo-100 shadow-md min-h-[500px] lg:h-full lg:sticky lg:top-0">
         <div className="p-4 border-b border-slate-100 bg-indigo-50/50 flex items-center gap-2">
           <Bot className="w-5 h-5 text-indigo-600" />
           <h3 className="font-semibold text-indigo-900">AI 資料助理</h3>
@@ -376,7 +378,6 @@ export default function AnalyzePage() {
           </div>
         </div>
       </Card>
-      </div>
     </div>
   );
 }

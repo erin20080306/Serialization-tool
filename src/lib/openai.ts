@@ -83,6 +83,8 @@ function buildDeterministicAnalysis(
 ) {
   const numericColumns = profile.columns.filter((column) => column.numeric).slice(0, 4);
   const rankedMetrics = profile.categoryMetrics.slice(0, 4);
+  // 商業排行優先（categoryMetrics 已依客戶/商品 × 營業額排序）
+  const businessMetric = profile.categoryMetrics[0];
   const focusRows = userQuestion
     ? profile.categoryMetrics
         .flatMap((metric) =>
@@ -97,10 +99,15 @@ function buildDeterministicAnalysis(
         .slice(0, 5)
     : [];
 
-  const conclusion =
-    focusRows.length > 0
-      ? `${focusRows[0].value} 在「${focusRows[0].metricColumn}」的分組總計為 ${focusRows[0].total.toLocaleString()}，可作為本次問題的主要判斷依據。`
-      : `這份資料共有 ${profile.rowCount.toLocaleString()} 筆、${profile.columnCount} 個欄位；主要可從數值欄位與分類排行切入分析。`;
+  let conclusion: string;
+  if (focusRows.length > 0) {
+    conclusion = `${focusRows[0].value} 在「${focusRows[0].metricColumn}」的分組總計為 ${focusRows[0].total.toLocaleString()}，可作為本次問題的主要判斷依據。`;
+  } else if (businessMetric?.topRows[0]) {
+    const top = businessMetric.topRows[0];
+    conclusion = `以「${businessMetric.categoryColumn}」分組看「${businessMetric.metricColumn}」，最高為「${top.value}」，總計 ${top.total.toLocaleString()}。`;
+  } else {
+    conclusion = `這份資料共有 ${profile.rowCount.toLocaleString()} 筆、${profile.columnCount} 個欄位；主要可從數值欄位與分類排行切入分析。`;
+  }
 
   const keyNumbers = [
     ...numericColumns.map(
@@ -175,15 +182,23 @@ export async function analyzeData(
     data: columns.reduce((acc, col, i) => ({ ...acc, [col]: row[i] }), {}),
   }));
 
-  const systemPrompt = `你是一個資深資料分析師。回答必須具體、可驗證、可行動，避免空泛稱讚。
-你會收到欄位、資料剖析統計、分組排行與部分樣本。
+  const systemPrompt = `你是一個資深商業資料分析師。回答必須具體、可驗證、可行動，避免空泛稱讚。
+你會收到欄位、資料剖析統計、商業欄位辨識、分組排行與部分樣本。
+這些統計是用「完整資料」計算出來的，請直接引用，不要只看樣本資料。
+
+商業理解規則（最重要）：
+- 「商業欄位辨識」會標出哪些欄位是客戶、商品、地區、營業額/金額、數量、日期。
+- 回答商業問題時，務必優先使用這些欄位。例如問「哪個客戶營業額最高」時，要用客戶維度 × 營業額指標的分組排行回答。
+- 「營業額 / 銷售額 / 金額 / 營收」一律視為金額類指標；「客戶 / 顧客 / 會員」一律視為客戶維度。
+- 若使用者問的商業概念在資料中有對應欄位，直接用該欄位的統計數字回答，不要說資料不足。
+
 請用繁體中文，依照以下格式回答：
 
 **一句話結論**
-- 直接回答使用者最可能關心的結論。
+- 直接回答使用者最可能關心的結論，並引用實際數字。
 
 **關鍵數字**
-- 列出 3-5 個有數字依據的觀察，必須引用欄位名稱與數值。
+- 列出 3-5 個有數字依據的觀察，必須引用欄位名稱與數值（優先引用商業欄位）。
 
 **異常與風險**
 - 如果資料不足以判斷，明確說「目前資料不足以判定」，並說需要哪個欄位。

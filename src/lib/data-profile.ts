@@ -15,9 +15,20 @@ export interface DateProfile {
   max: string;
 }
 
+export type SemanticRole =
+  | 'customer'
+  | 'product'
+  | 'revenue'
+  | 'quantity'
+  | 'region'
+  | 'date'
+  | 'category'
+  | 'metric';
+
 export interface ColumnProfile {
   name: string;
   type: 'number' | 'date' | 'category' | 'text';
+  semantic?: SemanticRole;
   nonEmptyCount: number;
   emptyCount: number;
   uniqueCount: number;
@@ -30,6 +41,8 @@ export interface ColumnProfile {
 export interface CategoryMetricProfile {
   categoryColumn: string;
   metricColumn: string;
+  categorySemantic?: SemanticRole;
+  metricSemantic?: SemanticRole;
   topRows: Array<{
     value: string;
     total: number;
@@ -42,11 +55,72 @@ export interface DataProfile {
   columnCount: number;
   columns: ColumnProfile[];
   categoryMetrics: CategoryMetricProfile[];
+  businessColumns: Array<{ name: string; semantic: SemanticRole }>;
 }
 
 function isEmpty(value: unknown) {
   return value === null || value === undefined || value === '';
 }
+
+const SEMANTIC_KEYWORDS: Array<{ role: SemanticRole; keywords: string[] }> = [
+  {
+    role: 'revenue',
+    keywords: [
+      '營業額', '營收', '銷售額', '銷售金額', '銷貨', '金額', '收入', '營業收入', '小計', '總計', '總額',
+      'revenue', 'sales', 'amount', 'turnover', 'income', 'total',
+    ],
+  },
+  {
+    role: 'quantity',
+    keywords: ['數量', '件數', '銷量', '銷售量', '出貨量', '庫存', 'qty', 'quantity', 'count', 'units', 'volume'],
+  },
+  {
+    role: 'customer',
+    keywords: ['客戶', '客户', '顧客', '會員', '買家', '帳號', '客戶名稱', 'customer', 'client', 'account', 'buyer', 'member'],
+  },
+  {
+    role: 'product',
+    keywords: ['商品', '產品', '品名', '品項', '貨號', '料號', '型號', 'product', 'item', 'sku', 'goods', 'model'],
+  },
+  {
+    role: 'region',
+    keywords: ['地區', '區域', '城市', '縣市', '門市', '分店', '店別', '店', '據點', 'region', 'area', 'city', 'store', 'branch', 'location'],
+  },
+  {
+    role: 'date',
+    keywords: ['日期', '時間', '月份', '年份', '訂單日期', 'date', 'time', 'month', 'year', 'day', 'period'],
+  },
+];
+
+function detectSemanticRole(columnName: string, type: ColumnProfile['type']): SemanticRole | undefined {
+  const normalized = columnName.toLowerCase().trim();
+  const numericRoles: SemanticRole[] = ['revenue', 'quantity'];
+
+  for (const { role, keywords } of SEMANTIC_KEYWORDS) {
+    const matched = keywords.some((keyword) => normalized.includes(keyword.toLowerCase()));
+    if (!matched) continue;
+    // 數值型語意（營業額/數量）需要實際是數值欄位才採用
+    if (numericRoles.includes(role) && type !== 'number') continue;
+    return role;
+  }
+
+  return undefined;
+}
+
+// 分類欄位語意優先序（客戶/商品/地區優先成為分組維度）
+const CATEGORY_PRIORITY: Record<string, number> = {
+  customer: 0,
+  product: 1,
+  region: 2,
+  category: 3,
+};
+
+// 數值欄位語意優先序（營業額優先成為衡量指標）
+const METRIC_PRIORITY: Record<string, number> = {
+  revenue: 0,
+  quantity: 1,
+  metric: 2,
+};
 
 function formatValue(value: unknown) {
   if (value instanceof Date) {
@@ -89,6 +163,7 @@ export function buildDataProfile(columns: string[], rows: unknown[][]): DataProf
     const profile: ColumnProfile = {
       name,
       type,
+      semantic: detectSemanticRole(name, type),
       nonEmptyCount: nonEmptyValues.length,
       emptyCount,
       uniqueCount: uniqueValues.size,
@@ -127,8 +202,19 @@ export function buildDataProfile(columns: string[], rows: unknown[][]): DataProf
     return profile;
   });
 
-  const numericColumns = profiles.filter((column) => column.numeric);
-  const categoryColumns = profiles.filter((column) => column.type === 'category' && column.uniqueCount > 1);
+  // 依商業語意排序：客戶/商品/地區優先成為分組維度，營業額優先成為衡量指標
+  const numericColumns = profiles
+    .filter((column) => column.numeric)
+    .sort(
+      (a, b) =>
+        (METRIC_PRIORITY[a.semantic ?? ''] ?? 99) - (METRIC_PRIORITY[b.semantic ?? ''] ?? 99)
+    );
+  const categoryColumns = profiles
+    .filter((column) => column.type === 'category' && column.uniqueCount > 1)
+    .sort(
+      (a, b) =>
+        (CATEGORY_PRIORITY[a.semantic ?? ''] ?? 99) - (CATEGORY_PRIORITY[b.semantic ?? ''] ?? 99)
+    );
   const categoryMetrics: CategoryMetricProfile[] = [];
 
   categoryColumns.slice(0, 3).forEach((categoryColumn) => {
@@ -162,17 +248,32 @@ export function buildDataProfile(columns: string[], rows: unknown[][]): DataProf
         categoryMetrics.push({
           categoryColumn: categoryColumn.name,
           metricColumn: metricColumn.name,
+          categorySemantic: categoryColumn.semantic,
+          metricSemantic: metricColumn.semantic,
           topRows,
         });
       }
     });
   });
 
+  // 將含商業語意的分組（如 客戶 x 營業額）排到最前面
+  categoryMetrics.sort((a, b) => {
+    const score = (m: CategoryMetricProfile) =>
+      (CATEGORY_PRIORITY[m.categorySemantic ?? ''] ?? 99) +
+      (METRIC_PRIORITY[m.metricSemantic ?? ''] ?? 99);
+    return score(a) - score(b);
+  });
+
+  const businessColumns = profiles
+    .filter((column) => column.semantic)
+    .map((column) => ({ name: column.name, semantic: column.semantic as SemanticRole }));
+
   return {
     rowCount: rows.length,
     columnCount: columns.length,
     columns: profiles,
     categoryMetrics,
+    businessColumns,
   };
 }
 
@@ -209,9 +310,27 @@ export function formatDataProfileForPrompt(profile: DataProfile) {
     )
     .join('\n');
 
+  const semanticLabel: Record<SemanticRole, string> = {
+    customer: '客戶維度',
+    product: '商品維度',
+    region: '地區維度',
+    revenue: '營業額/金額指標',
+    quantity: '數量指標',
+    date: '日期維度',
+    category: '分類維度',
+    metric: '數值指標',
+  };
+
+  const businessSummary = profile.businessColumns
+    .map((column) => `- ${column.name} → ${semanticLabel[column.semantic]}`)
+    .join('\n');
+
   return `資料概況:
 - rows=${profile.rowCount}
 - columns=${profile.columnCount}
+
+商業欄位辨識(請優先使用這些欄位回答商業問題):
+${businessSummary || '- none'}
 
 數值欄位:
 ${numericSummary || '- none'}
