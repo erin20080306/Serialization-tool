@@ -1,6 +1,58 @@
 import * as XLSX from 'xlsx';
 import type { ParsedData, ColumnAnalysis } from './types';
 
+const DATE_COLUMN_PATTERN = /(日期|時間|建立|更新|開立|到期|date|time|created|updated)/i;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function isDateLikeColumn(columnName: string) {
+  return DATE_COLUMN_PATTERN.test(columnName);
+}
+
+function excelSerialToDateTime(value: number) {
+  if (!Number.isFinite(value) || value <= 0 || value > 100000) {
+    return null;
+  }
+
+  const date = new Date((value - 25569) * MS_PER_DAY);
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+
+  const datePart = date.toISOString().slice(0, 10);
+  const timePart = date.toISOString().slice(11, 16);
+  return timePart === '00:00' ? datePart : `${datePart} ${timePart}`;
+}
+
+function normalizeDateColumns(columns: string[], rows: any[][]) {
+  const dateColumnIndexes = columns
+    .map((column, index) => (isDateLikeColumn(column) ? index : -1))
+    .filter((index) => index >= 0);
+
+  if (dateColumnIndexes.length === 0) {
+    return rows;
+  }
+
+  return rows.map((row) =>
+    row.map((cell, index) => {
+      if (!dateColumnIndexes.includes(index)) {
+        return cell;
+      }
+
+      if (cell instanceof Date) {
+        const datePart = cell.toISOString().slice(0, 10);
+        const timePart = cell.toISOString().slice(11, 16);
+        return timePart === '00:00' ? datePart : `${datePart} ${timePart}`;
+      }
+
+      if (typeof cell === 'number') {
+        return excelSerialToDateTime(cell) ?? cell;
+      }
+
+      return cell;
+    })
+  );
+}
+
 // Parse Excel/CSV file
 export async function parseExcelFile(
   file: File
@@ -20,7 +72,7 @@ export async function parseExcelFile(
 
       if (jsonData.length > 0) {
         const columns = jsonData[0].map((col) => String(col));
-        const rows = jsonData.slice(1);
+        const rows = normalizeDateColumns(columns, jsonData.slice(1));
 
         parsedData.push({
           columns,
