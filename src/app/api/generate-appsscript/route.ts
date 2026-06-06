@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateAppsScript } from '@/lib/openai';
-import { resolveModel } from '@/lib/models';
+import { resolveModel, getModelCost } from '@/lib/models';
 import { requireCredits } from '@/lib/credits';
 
 export async function POST(req: NextRequest) {
@@ -11,10 +11,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
     }
 
-    const { response, balance, unlimited } = await requireCredits();
+    const resolved = resolveModel(model);
+    const { response, balance, unlimited } = await requireCredits(getModelCost(resolved));
     if (response) return response;
 
-    const result = await generateAppsScript(prompt, context, resolveModel(model));
+    const result = await generateAppsScript(prompt, context, resolved);
 
     return NextResponse.json({ ...result, balance: unlimited ? null : balance });
   } catch (error) {

@@ -57,6 +57,7 @@ export default function SettingsPage() {
 
   const flashPlans = credits?.plans.filter((p) => p.model === 'gemini-2.5-flash' && p.price > 0) ?? [];
   const proPlans = credits?.plans.filter((p) => p.model === 'gemini-2.5-pro') ?? [];
+  const selectedCost = MODELS.find((m) => m.id === selected)?.costPerAction ?? 30;
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 lg:p-8">
@@ -96,19 +97,19 @@ export default function SettingsPage() {
                 <div className="mt-1 text-2xl font-bold text-slate-900">{credits?.balance ?? 0}</div>
               </div>
               <div className="rounded-lg border border-slate-200 p-4">
-                <div className="text-xs text-slate-500">每次消耗</div>
-                <div className="mt-1 text-2xl font-bold text-slate-900">{credits?.costPerAction ?? 20} 點</div>
+                <div className="text-xs text-slate-500">目前模型每次消耗</div>
+                <div className="mt-1 text-2xl font-bold text-slate-900">{selectedCost} 點</div>
               </div>
               <div className="rounded-lg border border-slate-200 p-4">
                 <div className="text-xs text-slate-500">約可使用</div>
                 <div className="mt-1 text-2xl font-bold text-slate-900">
-                  {Math.floor((credits?.balance ?? 0) / (credits?.costPerAction ?? 20))} 次
+                  {Math.floor((credits?.balance ?? 0) / selectedCost)} 次
                 </div>
               </div>
             </div>
           )}
           <p className="text-xs text-slate-400 mt-3">
-            分析、AI 問答、產生公式、產生 Apps Script 每次各消耗 {credits?.costPerAction ?? 20} 點。
+            點數依模型計費：Gemini 2.5 Flash 每次 30 點、Gemini 2.5 Pro 每次 50 點、Gemini Flash (Latest) 每次 20 點。
           </p>
         </Card>
 
@@ -136,7 +137,12 @@ export default function SettingsPage() {
                     <Icon className={`w-5 h-5 ${active ? 'text-indigo-600' : 'text-slate-400'}`} />
                     {active && <Check className="w-4 h-4 text-indigo-600" />}
                   </div>
-                  <div className="mt-2 font-semibold text-slate-900">{model.label}</div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-900">{model.label}</span>
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">
+                      {model.costPerAction} 點/次
+                    </span>
+                  </div>
                   <div className="text-xs text-indigo-600 mb-2">{model.tagline}</div>
                   <div className="flex flex-wrap gap-1 mb-2">
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">速度 {model.speed}</span>

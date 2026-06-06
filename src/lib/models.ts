@@ -32,7 +32,7 @@ export const MODELS: ModelConfig[] = [
     speed: '快',
     cost: '中低',
     reasoning: '良好',
-    costPerAction: 20,
+    costPerAction: 30,
   },
   {
     id: 'gemini-2.5-pro',
@@ -47,7 +47,7 @@ export const MODELS: ModelConfig[] = [
     speed: '中等',
     cost: '較高',
     reasoning: '最強',
-    costPerAction: 20,
+    costPerAction: 50,
   },
   {
     id: 'gemini-flash-latest',
@@ -77,6 +77,11 @@ export function resolveModel(value: unknown): ModelId {
 
 export function getModelConfig(id: ModelId): ModelConfig {
   return MODELS.find((m) => m.id === id) ?? MODELS[0];
+}
+
+// 取得指定模型每次動作消耗的點數
+export function getModelCost(value: unknown): number {
+  return getModelConfig(resolveModel(value)).costPerAction;
 }
 
 // 動作類型（用於前端顯示，全部統一成本）

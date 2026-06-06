@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { analyzeColumns, detectTableType, findAnomalies } from '@/lib/excel-parser';
 import { analyzeData } from '@/lib/openai';
 import { buildDataProfile } from '@/lib/data-profile';
-import { resolveModel } from '@/lib/models';
+import { resolveModel, getModelCost } from '@/lib/models';
 import { getCreditState, deductCredits } from '@/lib/credits';
 
 // POST /api/analyze - 對資料集進行欄位分析 + AI 洞察
@@ -25,11 +25,13 @@ export async function POST(req: NextRequest) {
     let balance: number | null = null;
     let insufficientCredits = false;
 
+    const resolved = resolveModel(model);
+    const cost = getModelCost(resolved);
     const state = await getCreditState();
-    if (state.unlimited || state.balance >= state.costPerAction) {
+    if (state.unlimited || state.balance >= cost) {
       try {
-        await deductCredits();
-        insights = await analyzeData(columns, rows, undefined, resolveModel(model));
+        await deductCredits(cost);
+        insights = await analyzeData(columns, rows, undefined, resolved);
       } catch (e) {
         console.warn('AI insights unavailable:', e);
       }

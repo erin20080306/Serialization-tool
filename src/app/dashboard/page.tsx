@@ -2,8 +2,15 @@
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Plus, MessageSquare, Calculator, Terminal, Database } from 'lucide-react';
+import { Plus, MessageSquare, Calculator, Terminal, Database, Cpu, Settings, Zap, Brain, Sparkles, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+import { MODELS } from '@/lib/models';
+
+const MODEL_ACCENT: Record<string, { icon: typeof Zap; color: string; bg: string }> = {
+  'gemini-2.5-flash': { icon: Zap, color: 'text-indigo-600', bg: 'bg-indigo-100' },
+  'gemini-2.5-pro': { icon: Brain, color: 'text-purple-600', bg: 'bg-purple-100' },
+  'gemini-flash-latest': { icon: Sparkles, color: 'text-amber-600', bg: 'bg-amber-100' },
+};
 
 export default function DashboardHome() {
   return (
@@ -49,6 +56,53 @@ export default function DashboardHome() {
           </Card>
         </Link>
       </div>
+
+      {/* 可用 AI 模型總覽 */}
+      <Card className="p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-5 h-5 text-indigo-600" />
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">可選用的 AI 模型</h3>
+              <p className="text-sm text-slate-500">
+                可在<span className="font-medium text-slate-700">「設定」</span>頁切換模型並選擇付費方案。
+              </p>
+            </div>
+          </div>
+          <Link href="/settings">
+            <Button variant="outline" className="gap-2">
+              <Settings className="w-4 h-4" /> 前往設定 / 選擇方案
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {MODELS.map((model) => {
+            const accent = MODEL_ACCENT[model.id] ?? MODEL_ACCENT['gemini-2.5-flash'];
+            const Icon = accent.icon;
+            return (
+              <div key={model.id} className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className={`w-9 h-9 rounded-lg ${accent.bg} flex items-center justify-center`}>
+                    <Icon className={`w-5 h-5 ${accent.color}`} />
+                  </div>
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">
+                    {model.costPerAction} 點/次
+                  </span>
+                </div>
+                <div className="font-semibold text-slate-900">{model.label}</div>
+                <div className="text-xs text-indigo-600 mb-2">{model.tagline}</div>
+                <p className="text-xs text-slate-500">{model.goodFor[0]}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-xs text-slate-400 mt-4">
+          點數計費：Gemini 2.5 Flash 每次 30 點、Gemini 2.5 Pro 每次 50 點、Gemini Flash (Latest) 每次 20 點。
+        </p>
+      </Card>
 
       <div className="mt-8">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">最近的專案</h3>
