@@ -118,42 +118,97 @@ export function detectTableType(
 }
 
 // Find anomalies in numeric data
+// 綜合多種偵測：Z-score、IQR 離群值、空值比例過高、單一數值佔比過大
 export function findAnomalies(
   columns: string[],
   rows: any[][]
 ): Array<{ row: number; column: string; value: any; reason: string }> {
   const anomalies: Array<{ row: number; column: string; value: any; reason: string }> = [];
+  const isEmpty = (v: any) => v === null || v === undefined || v === '';
 
   columns.forEach((col, colIndex) => {
-    const values = rows.map((row) => row[colIndex]).filter((v) => !isNaN(Number(v)));
-    
-    if (values.length > 0) {
-      const numericValues = values.map(Number);
+    const rawValues = rows.map((row) => row[colIndex]);
+    const numericPairs = rows
+      .map((row, idx) => ({ idx, num: Number(row[colIndex]), raw: row[colIndex] }))
+      .filter((p) => !isEmpty(p.raw) && Number.isFinite(p.num));
+    const numericValues = numericPairs.map((p) => p.num);
+
+    // 1) 空值比例過高（資料品質風險）
+    const emptyCount = rawValues.filter(isEmpty).length;
+    if (rawValues.length > 0 && emptyCount / rawValues.length > 0.3) {
+      anomalies.push({
+        row: 0,
+        column: col,
+        value: `${emptyCount}/${rawValues.length}`,
+        reason: `欄位「${col}」有 ${Math.round((emptyCount / rawValues.length) * 100)}% 為空值，可能影響統計準確度。`,
+      });
+    }
+
+    if (numericValues.length >= 4) {
       const mean = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
       const stdDev = Math.sqrt(
         numericValues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / numericValues.length
       );
 
-      rows.forEach((row, rowIndex) => {
-        const value = row[colIndex];
-        if (!isNaN(Number(value))) {
-          const numValue = Number(value);
-          const zScore = Math.abs((numValue - mean) / stdDev);
+      // IQR 離群值
+      const sorted = [...numericValues].sort((a, b) => a - b);
+      const q = (p: number) => {
+        const pos = (sorted.length - 1) * p;
+        const base = Math.floor(pos);
+        const rest = pos - base;
+        return sorted[base] + (sorted[base + 1] !== undefined ? rest * (sorted[base + 1] - sorted[base]) : 0);
+      };
+      const q1 = q(0.25);
+      const q3 = q(0.75);
+      const iqr = q3 - q1;
+      const lower = q1 - 1.5 * iqr;
+      const upper = q3 + 1.5 * iqr;
 
-          if (zScore > 2) {
-            anomalies.push({
-              row: rowIndex + 2, // +2 because of header and 0-index
-              column: col,
-              value,
-              reason: `數值偏離平均值超過 2 個標準差 (Z-score: ${zScore.toFixed(2)})`,
-            });
-          }
+      numericPairs.forEach((p) => {
+        const zScore = stdDev > 0 ? Math.abs((p.num - mean) / stdDev) : 0;
+        const isIqrOutlier = iqr > 0 && (p.num < lower || p.num > upper);
+
+        if (zScore > 2 || isIqrOutlier) {
+          anomalies.push({
+            row: p.idx + 2, // +2: 標題列與 0-based
+            column: col,
+            value: p.raw,
+            reason:
+              zScore > 2
+                ? `偏離平均 ${mean.toFixed(0)} 超過 2 個標準差 (Z=${zScore.toFixed(2)})，屬於極端值。`
+                : `落在 IQR 正常範圍 [${lower.toFixed(0)}, ${upper.toFixed(0)}] 之外，疑似離群值。`,
+          });
         }
       });
+    } else if (numericValues.length >= 2) {
+      // 小樣本：用最大/最小相對差距判斷
+      const max = Math.max(...numericValues);
+      const min = Math.min(...numericValues);
+      const mean = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+      if (min > 0 && max / min >= 3) {
+        const top = numericPairs.find((p) => p.num === max);
+        if (top) {
+          anomalies.push({
+            row: top.idx + 2,
+            column: col,
+            value: top.raw,
+            reason: `此值 ${max.toLocaleString()} 約為最小值 ${min.toLocaleString()} 的 ${(max / min).toFixed(1)} 倍，明顯高於平均 ${mean.toFixed(0)}，建議查核。`,
+          });
+        }
+      }
     }
   });
 
-  return anomalies;
+  // 去重並限制數量
+  const seen = new Set<string>();
+  return anomalies
+    .filter((a) => {
+      const key = `${a.row}-${a.column}-${a.reason}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 15);
 }
 
 // Convert parsed data to CSV format

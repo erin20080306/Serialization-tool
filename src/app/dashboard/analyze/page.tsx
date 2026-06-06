@@ -220,6 +220,8 @@ export default function AnalyzePage() {
 
   const numericColumns = analysis?.profile?.columns.filter((column) => column.numeric) ?? [];
   const topMetric = analysis?.profile?.categoryMetrics[0];
+  const rankingCharts = analysis?.profile?.categoryMetrics?.slice(0, 2) ?? [];
+  const anomalies = analysis?.anomalies ?? [];
   const insightLines =
     analysis?.insights
       ?.split('\n')
@@ -373,6 +375,86 @@ export default function AnalyzePage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </Card>
+
+      {/* 分析圖：分組排行長條圖 */}
+      {rankingCharts.length > 0 && (
+        <Card className="border-slate-200 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-indigo-600" />
+            <h3 className="font-semibold text-sm">分析圖 · 分組排行</h3>
+          </div>
+          <div className="p-4 space-y-6">
+            {rankingCharts.map((metric, mIdx) => {
+              const maxTotal = Math.max(...metric.topRows.map((r) => Math.abs(r.total)), 1);
+              return (
+                <div key={mIdx}>
+                  <div className="text-xs font-medium text-slate-600 mb-2">
+                    依「{metric.categoryColumn}」分組看「{metric.metricColumn}」（前 {metric.topRows.length} 名）
+                  </div>
+                  <div className="space-y-2">
+                    {metric.topRows.map((row, rIdx) => (
+                      <div key={rIdx} className="flex items-center gap-2">
+                        <div className="w-24 shrink-0 truncate text-xs text-slate-700" title={row.value}>
+                          {row.value}
+                        </div>
+                        <div className="flex-1 bg-slate-100 rounded h-5 overflow-hidden">
+                          <div
+                            className="h-full bg-indigo-500 rounded flex items-center justify-end pr-2"
+                            style={{ width: `${Math.max((Math.abs(row.total) / maxTotal) * 100, 4)}%` }}
+                          >
+                            <span className="text-[10px] text-white font-medium whitespace-nowrap">
+                              {row.total.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* 異常與風險明細 */}
+      <Card className="border-slate-200 overflow-hidden">
+        <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <h3 className="font-semibold text-sm">異常與風險</h3>
+          </div>
+          <Badge variant={anomalies.length > 0 ? 'destructive' : 'secondary'}>
+            {anomalies.length} 筆
+          </Badge>
+        </div>
+        <div className="p-4">
+          {analysisLoading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="w-4 h-4 animate-spin" /> 正在偵測異常與資料品質...
+            </div>
+          ) : anomalies.length > 0 ? (
+            <ul className="space-y-2 max-h-[280px] overflow-auto">
+              {anomalies.map((item, idx) => (
+                <li key={idx} className="rounded-md border border-amber-100 bg-amber-50/60 p-3 text-sm">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="font-medium text-amber-800">{item.column}</span>
+                    {item.row > 0 && (
+                      <span className="text-xs text-amber-600">第 {item.row} 列</span>
+                    )}
+                    <span className="text-xs text-slate-500">值：{String(item.value)}</span>
+                  </div>
+                  <div className="text-xs text-slate-600">{item.reason}</div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-500">
+              目前未偵測到統計型異常（離群值、空值過多或極端倍數）。資料量較少或分布平均時屬正常；若要更精準判讀，建議補上金額、數量、日期或客戶欄位。
+            </p>
+          )}
         </div>
       </Card>
       </div>
