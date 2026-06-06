@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getSelectedModel } from '@/lib/client-model';
 
@@ -222,6 +222,12 @@ export default function AnalyzePage() {
   const topMetric = analysis?.profile?.categoryMetrics[0];
   const rankingCharts = analysis?.profile?.categoryMetrics?.slice(0, 2) ?? [];
   const anomalies = analysis?.anomalies ?? [];
+  // 圓餅圖：取第一組分組排行的佔比（只計正值）
+  const pieMetric = analysis?.profile?.categoryMetrics?.[0];
+  const pieSlices =
+    pieMetric?.topRows
+      .filter((row) => row.total > 0)
+      .map((row) => ({ label: row.value, value: row.total })) ?? [];
   const insightLines =
     analysis?.insights
       ?.split('\n')
@@ -419,6 +425,22 @@ export default function AnalyzePage() {
         </Card>
       )}
 
+      {/* 分析圖：圓餅圖（佔比） */}
+      {pieMetric && pieSlices.length > 0 && (
+        <Card className="border-slate-200 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+            <PieChartIcon className="w-4 h-4 text-indigo-600" />
+            <h3 className="font-semibold text-sm">分析圖 · 佔比圓餅圖</h3>
+          </div>
+          <div className="p-4">
+            <div className="text-xs font-medium text-slate-600 mb-3">
+              「{pieMetric.categoryColumn}」對「{pieMetric.metricColumn}」的佔比（前 {pieSlices.length} 名）
+            </div>
+            <PieChart slices={pieSlices} />
+          </div>
+        </Card>
+      )}
+
       {/* 異常與風險明細 */}
       <Card className="border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
@@ -547,6 +569,67 @@ export default function AnalyzePage() {
           </div>
         </div>
       </Card>
+    </div>
+  );
+}
+
+const PIE_COLORS = [
+  '#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4',
+  '#8b5cf6', '#ef4444', '#14b8a6', '#eab308', '#3b82f6',
+];
+
+function PieChart({ slices }: { slices: Array<{ label: string; value: number }> }) {
+  const total = slices.reduce((sum, s) => sum + s.value, 0);
+  if (total <= 0) return null;
+
+  const radius = 80;
+  const cx = 90;
+  const cy = 90;
+  let cumulative = 0;
+
+  const polar = (angle: number) => {
+    const rad = ((angle - 90) * Math.PI) / 180;
+    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+  };
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center gap-6">
+      <svg viewBox="0 0 180 180" className="w-44 h-44 shrink-0">
+        {slices.length === 1 ? (
+          <circle cx={cx} cy={cy} r={radius} fill={PIE_COLORS[0]} />
+        ) : (
+          slices.map((slice, idx) => {
+            const startAngle = (cumulative / total) * 360;
+            cumulative += slice.value;
+            const endAngle = (cumulative / total) * 360;
+            const start = polar(startAngle);
+            const end = polar(endAngle);
+            const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+            const d = `M ${cx} ${cy} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
+            return <path key={idx} d={d} fill={PIE_COLORS[idx % PIE_COLORS.length]} stroke="#fff" strokeWidth="1" />;
+          })
+        )}
+      </svg>
+      <div className="flex-1 w-full space-y-1.5">
+        {slices.map((slice, idx) => {
+          const pct = (slice.value / total) * 100;
+          return (
+            <div key={idx} className="flex items-center gap-2 text-xs">
+              <span
+                className="w-3 h-3 rounded-sm shrink-0"
+                style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}
+              />
+              <span className="flex-1 truncate text-slate-700" title={slice.label}>
+                {slice.label}
+              </span>
+              <span className="text-slate-500 tabular-nums">{slice.value.toLocaleString()}</span>
+              <span className="w-12 text-right font-medium text-slate-800 tabular-nums">
+                {pct.toFixed(1)}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
