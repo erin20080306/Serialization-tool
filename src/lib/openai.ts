@@ -23,15 +23,28 @@ async function geminiGenerate(
     model?: ModelId;
   } = {}
 ): Promise<string> {
+  const selectedModel = options.model || ENV_MODEL;
+  // Gemini 2.5 Pro 強制以「思考模式」運作，無法將 thinkingBudget 設為 0；
+  // 其餘 Flash 系列則關閉思考以避免截斷並加快回應。
+  const isPro = selectedModel === 'gemini-2.5-pro';
+  const baseMaxTokens = options.maxOutputTokens ?? 1000;
+
+  // 注意：Gemini 2.5 系列會將「思考」(thinking) 計入 output tokens，
+  // maxOutputTokens 太小會吃掉預算導致 JSON 被截斷而解析失敗。
+  // Flash：關閉思考；Pro：保留思考並加大輸出上限預留思考空間。
+  // SDK 0.24 型別未含 thinkingConfig，但會將整個 generationConfig 原樣送出，故以 any 注入。
+  const generationConfig: Record<string, unknown> = {
+    temperature: options.temperature ?? 0.7,
+    maxOutputTokens: isPro ? baseMaxTokens + 6000 : baseMaxTokens,
+    ...(isPro ? {} : { thinkingConfig: { thinkingBudget: 0 } }),
+    ...(options.json ? { responseMimeType: 'application/json' } : {}),
+    ...(options.responseSchema ? { responseSchema: options.responseSchema } : {}),
+  };
+
   const model = genAI.getGenerativeModel({
-    model: options.model || ENV_MODEL,
+    model: selectedModel,
     systemInstruction: systemPrompt,
-    generationConfig: {
-      temperature: options.temperature ?? 0.7,
-      maxOutputTokens: options.maxOutputTokens ?? 1000,
-      ...(options.json ? { responseMimeType: 'application/json' } : {}),
-      ...(options.responseSchema ? { responseSchema: options.responseSchema } : {}),
-    },
+    generationConfig: generationConfig as any,
   });
 
   const result = await model.generateContent(userPrompt);
