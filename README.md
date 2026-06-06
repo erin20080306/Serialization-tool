@@ -42,6 +42,16 @@ https://serialization-tool.vercel.app/api/auth/callback/google
 
 If you test deployment-specific Vercel URLs directly, also add their matching callback URLs or use the production alias above.
 
+For public Google login, keep the sign-in flow to basic scopes only:
+
+```text
+openid
+email
+profile
+```
+
+Do not request Google Sheets scopes during sign-in unless the OAuth app has completed Google's verification process. If the app is still in Testing, only listed test users can log in; publish the OAuth app to Production when it is ready for any Google account.
+
 ## Deployment
 
 ```bash

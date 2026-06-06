@@ -49,14 +49,7 @@ export const authConfig: NextAuthConfig = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim(),
       authorization: {
         params: {
-          scope: [
-            'openid',
-            'email',
-            'profile',
-            'https://www.googleapis.com/auth/spreadsheets',
-          ].join(' '),
-          access_type: 'offline',
-          prompt: 'consent',
+          scope: ['openid', 'email', 'profile'].join(' '),
         },
       },
     }),
