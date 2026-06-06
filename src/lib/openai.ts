@@ -1,4 +1,8 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  GoogleGenerativeAI,
+  SchemaType,
+  type ResponseSchema,
+} from '@google/generative-ai';
 
 // 使用 Google Gemini 作為 AI 後端
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -8,7 +12,12 @@ const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 async function geminiGenerate(
   systemPrompt: string,
   userPrompt: string,
-  options: { temperature?: number; maxOutputTokens?: number; json?: boolean } = {}
+  options: {
+    temperature?: number;
+    maxOutputTokens?: number;
+    json?: boolean;
+    responseSchema?: ResponseSchema;
+  } = {}
 ): Promise<string> {
   const model = genAI.getGenerativeModel({
     model: MODEL_NAME,
@@ -17,12 +26,72 @@ async function geminiGenerate(
       temperature: options.temperature ?? 0.7,
       maxOutputTokens: options.maxOutputTokens ?? 1000,
       ...(options.json ? { responseMimeType: 'application/json' } : {}),
+      ...(options.responseSchema ? { responseSchema: options.responseSchema } : {}),
     },
   });
 
   const result = await model.generateContent(userPrompt);
   return result.response.text();
 }
+
+function parseGeminiJson<T>(text: string): T {
+  const trimmed = text.trim();
+  const withoutFence = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(withoutFence) as T;
+  } catch {
+    const firstBrace = withoutFence.indexOf('{');
+    const lastBrace = withoutFence.lastIndexOf('}');
+
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      return JSON.parse(withoutFence.slice(firstBrace, lastBrace + 1)) as T;
+    }
+
+    throw new Error('Gemini 回傳格式不是有效 JSON');
+  }
+}
+
+const stringArraySchema: ResponseSchema = {
+  type: SchemaType.ARRAY,
+  items: { type: SchemaType.STRING },
+};
+
+const formulaSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    formula: { type: SchemaType.STRING },
+    platform: { type: SchemaType.STRING },
+    description: { type: SchemaType.STRING },
+    assumptions: stringArraySchema,
+    troubleshooting: stringArraySchema,
+  },
+  required: ['formula', 'platform', 'description', 'assumptions'],
+};
+
+const appsScriptSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    code: { type: SchemaType.STRING },
+    instructions: stringArraySchema,
+    permissions: stringArraySchema,
+    triggers: stringArraySchema,
+  },
+  required: ['code', 'instructions', 'permissions'],
+};
+
+const reportInsightsSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    summary: { type: SchemaType.STRING },
+    keyFindings: stringArraySchema,
+    recommendations: stringArraySchema,
+  },
+  required: ['summary', 'keyFindings', 'recommendations'],
+};
 
 // Analyze data and provide insights
 export async function analyzeData(
@@ -86,8 +155,15 @@ export async function generateFormula(
       temperature: 0.3,
       maxOutputTokens: 800,
       json: true,
+      responseSchema: formulaSchema,
     });
-    const result = JSON.parse(text || '{}');
+    const result = parseGeminiJson<{
+      formula: string;
+      platform: string;
+      description: string;
+      assumptions: string[];
+      troubleshooting?: string[];
+    }>(text || '{}');
     return result;
   } catch (error) {
     console.error('Gemini API error:', error);
@@ -122,8 +198,14 @@ export async function generateAppsScript(
       temperature: 0.3,
       maxOutputTokens: 1500,
       json: true,
+      responseSchema: appsScriptSchema,
     });
-    const result = JSON.parse(text || '{}');
+    const result = parseGeminiJson<{
+      code: string;
+      instructions: string[];
+      permissions: string[];
+      triggers?: string[];
+    }>(text || '{}');
     return result;
   } catch (error) {
     console.error('Gemini API error:', error);
@@ -159,8 +241,13 @@ export async function generateReportInsights(
       temperature: 0.5,
       maxOutputTokens: 1000,
       json: true,
+      responseSchema: reportInsightsSchema,
     });
-    const result = JSON.parse(text || '{}');
+    const result = parseGeminiJson<{
+      summary: string;
+      keyFindings: string[];
+      recommendations: string[];
+    }>(text || '{}');
     return result;
   } catch (error) {
     console.error('Gemini API error:', error);
