@@ -1,11 +1,32 @@
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 
+function getAppUrl() {
+  const configuredUrl =
+    process.env.NEXTAUTH_URL?.trim() ||
+    process.env.AUTH_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim();
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/$/, '');
+  }
+
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return 'http://localhost:3000';
+}
+
 // Google OAuth2 client setup
 export function getGoogleOAuth2Client() {
   const clientId = process.env.GOOGLE_CLIENT_ID!;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
-  const redirectUri = process.env.NEXTAUTH_URL + '/api/auth/callback/google';
+  const redirectUri = `${getAppUrl()}/api/auth/callback/google`;
 
   return new OAuth2Client(clientId, clientSecret, redirectUri);
 }

@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Spreadsheet Copilot
 
-## Getting Started
+AI spreadsheet assistant built with Next.js, NextAuth, Google OAuth, Google Gemini, and Supabase.
 
-First, run the development server:
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create `.env.local` from `.env.example`, then fill in the real values.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Vercel Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The Vercel project must have these variables before production login and AI features work:
 
-## Learn More
+```bash
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+NEXTAUTH_URL=https://serialization-tool.vercel.app
+AUTH_URL=https://serialization-tool.vercel.app
+NEXTAUTH_SECRET
+AUTH_SECRET
+GEMINI_API_KEY
+GEMINI_MODEL=gemini-flash-latest
+NEXT_PUBLIC_APP_URL=https://serialization-tool.vercel.app
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+```
 
-To learn more about Next.js, take a look at the following resources:
+Supabase is optional for previewing the login UI, but project/history persistence requires a real Supabase URL and keys. `NEXT_PUBLIC_SUPABASE_URL` must look like `https://<project-ref>.supabase.co`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Google OAuth
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+In Google Cloud Console, configure the OAuth client as a Web application and add this authorized redirect URI:
 
-## Deploy on Vercel
+```text
+https://serialization-tool.vercel.app/api/auth/callback/google
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+If you test deployment-specific Vercel URLs directly, also add their matching callback URLs or use the production alias above.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+```bash
+npm run build
+git push origin main
+```
+
+Vercel is linked to `erins-projects-bc358159/serialization-tool` and deploys `main` to:
+
+```text
+https://serialization-tool.vercel.app
+```

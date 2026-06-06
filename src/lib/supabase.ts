@@ -9,9 +9,20 @@ import type {
 
 // 使用佔位值避免在缺少環境變數時崩潰（方便本地預覽）
 // 部署時請在 .env / Vercel 環境變數設定真實金鑰
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-key';
+const configuredSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+const configuredSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+const configuredSupabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+export const isSupabaseConfigured = Boolean(
+  configuredSupabaseUrl && configuredSupabaseAnonKey
+);
+export const isSupabaseAdminConfigured = Boolean(
+  configuredSupabaseUrl && configuredSupabaseServiceKey
+);
+
+const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
+const supabaseAnonKey = configuredSupabaseAnonKey || 'placeholder-anon-key';
+const supabaseServiceKey = configuredSupabaseServiceKey || 'placeholder-service-key';
 
 // Client for browser/client-side
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

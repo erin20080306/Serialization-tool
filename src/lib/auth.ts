@@ -1,5 +1,5 @@
 import NextAuth from 'next-auth';
-import { supabase } from './supabase';
+import { isSupabaseConfigured, supabase } from './supabase';
 import { authConfig } from './auth.config';
 
 // 完整版設定（Node runtime），含 Supabase 的 signIn callback
@@ -18,8 +18,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
 
       // 若 Supabase 未設定（使用佔位值），跳過資料庫寫入，仍允許登入測試
-      const supabaseConfigured = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (!supabaseConfigured) {
+      if (!isSupabaseConfigured) {
         return true;
       }
 

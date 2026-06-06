@@ -2,6 +2,18 @@ import type { NextAuthConfig } from 'next-auth';
 import Google from 'next-auth/providers/google';
 import Credentials from 'next-auth/providers/credentials';
 
+type TokenWithGoogleAccess = {
+  accessToken?: string;
+};
+
+type SessionWithGoogleAccess = {
+  accessToken?: string;
+};
+
+export const hasGoogleOAuthConfig = Boolean(
+  process.env.GOOGLE_CLIENT_ID?.trim() && process.env.GOOGLE_CLIENT_SECRET?.trim()
+);
+
 // 僅在開發環境啟用的「測試登入」provider（免 Google 設定）
 const devProviders =
   process.env.NODE_ENV !== 'production'
@@ -33,8 +45,20 @@ export const authConfig: NextAuthConfig = {
   trustHost: true,
   providers: [
     Google({
-      clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      clientId: process.env.GOOGLE_CLIENT_ID?.trim(),
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim(),
+      authorization: {
+        params: {
+          scope: [
+            'openid',
+            'email',
+            'profile',
+            'https://www.googleapis.com/auth/spreadsheets',
+          ].join(' '),
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
     }),
     ...devProviders,
   ],
@@ -55,10 +79,19 @@ export const authConfig: NextAuthConfig = {
       }
       return true;
     },
+    async jwt({ token, account }) {
+      if (account?.access_token) {
+        (token as TokenWithGoogleAccess).accessToken = account.access_token;
+      }
+      return token;
+    },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub as string;
       }
+      (session as SessionWithGoogleAccess).accessToken = (
+        token as TokenWithGoogleAccess
+      ).accessToken;
       return session;
     },
   },

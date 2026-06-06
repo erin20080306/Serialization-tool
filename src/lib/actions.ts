@@ -1,9 +1,15 @@
 'use server';
 
+import { redirect } from 'next/navigation';
 import { signIn, signOut } from './auth';
+import { hasGoogleOAuthConfig } from './auth.config';
 
 // 伺服器端動作：Google 登入
 export async function doGoogleSignIn() {
+  if (!hasGoogleOAuthConfig) {
+    redirect('/login?error=missing-google-oauth-env');
+  }
+
   await signIn('google', { redirectTo: '/dashboard' });
 }
 

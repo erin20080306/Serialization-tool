@@ -3,7 +3,16 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Sparkles } from 'lucide-react';
 
-export default function LoginPage() {
+type LoginPageProps = {
+  searchParams?: Promise<{
+    error?: string;
+  }>;
+};
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams;
+  const isMissingGoogleEnv = params?.error === 'missing-google-oauth-env';
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-indigo-50/50 to-white flex items-center justify-center px-6">
       <Card className="w-full max-w-md p-8">
@@ -16,6 +25,13 @@ export default function LoginPage() {
         
         <h1 className="text-2xl font-bold text-center mb-2">登入您的帳戶</h1>
         <p className="text-slate-500 text-center mb-8">開始使用 AI 試算表自動化助理</p>
+
+        {isMissingGoogleEnv && (
+          <div className="mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Vercel 尚未設定 Google OAuth 環境變數，請加入 GOOGLE_CLIENT_ID 與
+            GOOGLE_CLIENT_SECRET 後重新部署。
+          </div>
+        )}
         
         <form action={doGoogleSignIn}>
           <Button type="submit" className="w-full gap-2" size="lg">
