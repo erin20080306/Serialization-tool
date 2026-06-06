@@ -5,46 +5,37 @@ import type { ParsedData, ColumnAnalysis } from './types';
 export async function parseExcelFile(
   file: File
 ): Promise<{ data: ParsedData[]; fileName: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+  try {
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
 
-    reader.onload = (e) => {
-      try {
-        const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
+    const parsedData: ParsedData[] = [];
 
-        const parsedData: ParsedData[] = [];
+    workbook.SheetNames.forEach((sheetName) => {
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+      }) as any[][];
 
-        workbook.SheetNames.forEach((sheetName) => {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-            header: 1,
-          }) as any[][];
+      if (jsonData.length > 0) {
+        const columns = jsonData[0].map((col) => String(col));
+        const rows = jsonData.slice(1);
 
-          if (jsonData.length > 0) {
-            const columns = jsonData[0].map((col) => String(col));
-            const rows = jsonData.slice(1);
-
-            parsedData.push({
-              columns,
-              rows,
-              sheetName,
-            });
-          }
+        parsedData.push({
+          columns,
+          rows,
+          sheetName,
         });
-
-        resolve({
-          data: parsedData,
-          fileName: file.name,
-        });
-      } catch (error) {
-        reject(new Error('Failed to parse Excel file'));
       }
-    };
+    });
 
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsBinaryString(file);
-  });
+    return {
+      data: parsedData,
+      fileName: file.name,
+    };
+  } catch (error) {
+    throw new Error('Failed to parse Excel file');
+  }
 }
 
 // Analyze column data types and statistics

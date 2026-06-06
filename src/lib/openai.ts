@@ -55,6 +55,17 @@ function parseGeminiJson<T>(text: string): T {
   }
 }
 
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const codeBlock = trimmed.match(/```(?:javascript|js|google-apps-script)?\s*([\s\S]*?)```/i);
+
+  if (codeBlock?.[1]) {
+    return codeBlock[1].trim();
+  }
+
+  return trimmed;
+}
+
 const stringArraySchema: ResponseSchema = {
   type: SchemaType.ARRAY,
   items: { type: SchemaType.STRING },
@@ -70,17 +81,6 @@ const formulaSchema: ResponseSchema = {
     troubleshooting: stringArraySchema,
   },
   required: ['formula', 'platform', 'description', 'assumptions'],
-};
-
-const appsScriptSchema: ResponseSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    code: { type: SchemaType.STRING },
-    instructions: stringArraySchema,
-    permissions: stringArraySchema,
-    triggers: stringArraySchema,
-  },
-  required: ['code', 'instructions', 'permissions'],
 };
 
 const reportInsightsSchema: ResponseSchema = {
@@ -182,12 +182,8 @@ export async function generateAppsScript(
   triggers?: string[];
 }> {
   const systemPrompt = `你是一個 Google Apps Script 專家。使用者會用自然語言描述自動化需求，
-請產生完整的 Google Apps Script 程式碼。回傳格式必須是 JSON，包含以下欄位：
-- code: 完整的 Apps Script 程式碼
-- instructions: 使用步驟陣列
-- permissions: 需要的權限陣列
-- triggers: 觸發器設定說明陣列 (可選)
-請用繁體中文回答。`;
+請產生完整、可貼到 Apps Script 編輯器執行的 Google Apps Script 程式碼。
+只輸出程式碼，不要輸出 JSON、Markdown 說明或額外文字。`;
 
   const userPrompt = context
     ? `資料背景：${context}\n\n需求：${prompt}`
@@ -197,16 +193,25 @@ export async function generateAppsScript(
     const text = await geminiGenerate(systemPrompt, userPrompt, {
       temperature: 0.3,
       maxOutputTokens: 1500,
-      json: true,
-      responseSchema: appsScriptSchema,
     });
-    const result = parseGeminiJson<{
-      code: string;
-      instructions: string[];
-      permissions: string[];
-      triggers?: string[];
-    }>(text || '{}');
-    return result;
+    const code = stripCodeFence(text);
+
+    return {
+      code,
+      instructions: [
+        '開啟目標 Google 試算表，選擇「擴充功能」>「Apps Script」。',
+        '建立或取代 Code.gs，貼上產生的程式碼並儲存。',
+        '第一次執行時依照 Google 提示授權所需權限。',
+        '若程式包含觸發器函式，請在 Apps Script 的「觸發條件」頁面新增對應觸發器。',
+      ],
+      permissions: [
+        'Google Sheets 存取權限',
+        '依腳本內容可能需要 Gmail、Drive、Calendar 或外部服務存取權限',
+      ],
+      triggers: code.includes('ScriptApp.newTrigger')
+        ? ['程式碼包含 ScriptApp.newTrigger，可先執行建立觸發器的函式。']
+        : ['如需定時或表單送出自動執行，請在 Apps Script 觸發條件頁面手動新增。'],
+    };
   } catch (error) {
     console.error('Gemini API error:', error);
     throw new Error('Apps Script 產生失敗，請稍後再試');
