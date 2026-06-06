@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { FileText, Loader2, CheckCircle2, Download, FileSpreadsheet, Database } from 'lucide-react';
+import { BarChart3, CheckCircle2, Database, Download, FileText, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface Data {
@@ -17,6 +17,8 @@ export default function ReportsPage() {
   const [data, setData] = useState<Data | null>(null);
   const [generating, setGenerating] = useState(false);
   const [done, setDone] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisPreview, setAnalysisPreview] = useState<string | null>(null);
   const [options, setOptions] = useState({
     includeSummary: true,
     includeStatistics: true,
@@ -26,9 +28,34 @@ export default function ReportsPage() {
   useEffect(() => {
     const storedData = sessionStorage.getItem('uploadedData');
     if (storedData) {
-      setData(JSON.parse(storedData));
+      const parsedData = JSON.parse(storedData);
+      setData(parsedData);
+      void loadAnalysisPreview(parsedData);
     }
   }, []);
+
+  const loadAnalysisPreview = async (targetData: Data) => {
+    setAnalysisLoading(true);
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          columns: targetData.columns,
+          rows: targetData.rows,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setAnalysisPreview(result.insights || null);
+      }
+    } catch (error) {
+      console.error('Load report analysis preview error:', error);
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!data) return;
@@ -141,22 +168,50 @@ export default function ReportsPage() {
           </Button>
         </Card>
 
-        {done && (
-          <Card className="p-8 flex flex-col items-center justify-center text-center bg-green-50/50 border-green-200">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-              <FileSpreadsheet className="w-8 h-8 text-green-600" />
+        <div className="space-y-4">
+          <Card className="p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5 text-indigo-600" />
+              <h3 className="font-semibold text-lg">報表洞察預覽</h3>
             </div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">Analysis_Report.xlsx</h3>
-            <p className="text-sm text-slate-600 mb-6 max-w-[250px]">
-              已成功建立包含摘要、統計與樣式設定的報表檔案，並已下載。
-            </p>
-            <div className="flex gap-3 w-full">
-              <Button className="flex-1 gap-2 bg-green-600 hover:bg-green-700" onClick={handleGenerate}>
-                <Download className="w-4 h-4" /> 重新下載
-              </Button>
-            </div>
+            {analysisLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                正在整理報表摘要...
+              </div>
+            ) : analysisPreview ? (
+              <div className="text-sm text-slate-700 leading-relaxed space-y-1 max-h-[360px] overflow-auto">
+                {analysisPreview
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .filter((line) => line.length > 0)
+                  .slice(0, 14)
+                  .map((line, index) => (
+                    <div key={index}>{line.replace(/\*\*/g, '')}</div>
+                  ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">尚未取得 AI 洞察，但仍可產生含統計與原始資料的 Excel 報表。</p>
+            )}
           </Card>
-        )}
+
+          {done && (
+            <Card className="p-8 flex flex-col items-center justify-center text-center bg-green-50/50 border-green-200">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                <CheckCircle2 className="w-8 h-8 text-green-600" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Analysis_Report.xlsx</h3>
+              <p className="text-sm text-slate-600 mb-6 max-w-[250px]">
+                已成功建立包含摘要、統計與樣式設定的報表檔案，並已下載。
+              </p>
+              <div className="flex gap-3 w-full">
+                <Button className="flex-1 gap-2 bg-green-600 hover:bg-green-700" onClick={handleGenerate}>
+                  <Download className="w-4 h-4" /> 重新下載
+                </Button>
+              </div>
+            </Card>
+          )}
+        </div>
       </div>
     </div>
   );

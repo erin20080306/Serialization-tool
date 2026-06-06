@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Database, Bot, Send, Loader2 } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface Message {
@@ -19,6 +19,29 @@ interface Data {
   sheetName?: string;
   fileName?: string;
   tableType?: string;
+  columnAnalysis?: any[];
+}
+
+interface AnalysisResult {
+  columnAnalysis: any[];
+  tableType: string;
+  anomalies: Array<{ row: number; column: string; value: any; reason: string }>;
+  profile?: {
+    rowCount: number;
+    columnCount: number;
+    columns: Array<{
+      name: string;
+      type: string;
+      numeric?: { sum: number; average: number; min: number; max: number };
+      topValues?: Array<{ value: string; count: number }>;
+    }>;
+    categoryMetrics: Array<{
+      categoryColumn: string;
+      metricColumn: string;
+      topRows: Array<{ value: string; total: number; count: number }>;
+    }>;
+  };
+  insights?: string;
 }
 
 export default function AnalyzePage() {
@@ -27,22 +50,49 @@ export default function AnalyzePage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const storedData = sessionStorage.getItem('uploadedData');
     if (storedData) {
-      setData(JSON.parse(storedData));
+      const parsedData = JSON.parse(storedData) as Data;
+      setData(parsedData);
       setMessages([
         {
           role: 'assistant',
-          text: `你好！我是你的資料分析助手。我已經看過這份包含 ${JSON.parse(storedData).rows.length} 筆紀錄的資料表了。這看起來像是一份「${JSON.parse(storedData).tableType || '資料表'}」。有什麼我可以幫忙的嗎？你可以問我：「哪些商品營業額最高？」或「幫我找出異常資料」。`,
+          text: `我已載入這份「${parsedData.tableType || '資料表'}」，共有 ${parsedData.rows.length} 筆、${parsedData.columns.length} 個欄位。我會先產生報表分析摘要；你也可以直接問我「哪些項目最高？」「異常在哪？」「下一步該看什麼？」`,
         },
       ]);
+      void loadAnalysis(parsedData);
     } else {
       router.push('/dashboard/upload');
     }
   }, [router]);
+
+  const loadAnalysis = async (targetData: Data) => {
+    setAnalysisLoading(true);
+    try {
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          columns: targetData.columns,
+          rows: targetData.rows,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setAnalysis(result);
+      }
+    } catch (error) {
+      console.error('Load analysis error:', error);
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -67,7 +117,7 @@ export default function AnalyzePage() {
         body: JSON.stringify({
           question: userMsg,
           columns: data.columns,
-          rows: data.rows.slice(0, 50), // Send first 50 rows for context
+          rows: data.rows.slice(0, 500),
         }),
       });
 
@@ -108,8 +158,99 @@ export default function AnalyzePage() {
     );
   }
 
+  const numericColumns = analysis?.profile?.columns.filter((column) => column.numeric) ?? [];
+  const topMetric = analysis?.profile?.categoryMetrics[0];
+  const insightLines =
+    analysis?.insights
+      ?.split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(0, 10) ?? [];
+
   return (
-    <div className="h-full flex flex-col lg:flex-row gap-6">
+    <div className="h-full flex flex-col gap-6">
+      <Card className="border-slate-200 overflow-hidden">
+        <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-indigo-600" />
+            <div>
+              <h3 className="font-semibold text-slate-900">報表分析摘要</h3>
+              <p className="text-xs text-slate-500">
+                {analysisLoading ? '正在整理欄位、指標與洞察...' : '根據完整資料計算欄位統計、排行與異常'}
+              </p>
+            </div>
+          </div>
+          {analysisLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+          ) : (
+            <Badge variant="default">{analysis?.tableType || data.tableType || '資料表'}</Badge>
+          )}
+        </div>
+
+        <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="rounded-md border border-slate-200 p-3">
+            <div className="text-xs text-slate-500">資料量</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">
+              {(analysis?.profile?.rowCount ?? data.rows.length).toLocaleString()} 筆
+            </div>
+            <div className="text-xs text-slate-500">{analysis?.profile?.columnCount ?? data.columns.length} 個欄位</div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 p-3">
+            <div className="text-xs text-slate-500">數值指標</div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">{numericColumns.length} 個</div>
+            <div className="text-xs text-slate-500 truncate">
+              {numericColumns.slice(0, 3).map((column) => column.name).join('、') || '尚未偵測到'}
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 p-3">
+            <div className="flex items-center gap-1 text-xs text-slate-500">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              異常提示
+            </div>
+            <div className="mt-1 text-lg font-semibold text-slate-900">
+              {analysis?.anomalies?.length ?? 0} 筆
+            </div>
+            <div className="text-xs text-slate-500">超出統計門檻的資料列</div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 p-3">
+            <div className="flex items-center gap-1 text-xs text-slate-500">
+              <TrendingUp className="w-3.5 h-3.5" />
+              主要排行
+            </div>
+            <div className="mt-1 text-sm font-semibold text-slate-900 truncate">
+              {topMetric ? `${topMetric.categoryColumn} / ${topMetric.metricColumn}` : '尚未偵測到'}
+            </div>
+            <div className="text-xs text-slate-500 truncate">
+              {topMetric?.topRows[0] ? `${topMetric.topRows[0].value}: ${topMetric.topRows[0].total.toLocaleString()}` : '需要分類與數值欄位'}
+            </div>
+          </div>
+        </div>
+
+        {insightLines.length > 0 && (
+          <div className="px-4 pb-4">
+            <div className="rounded-md bg-indigo-50 border border-indigo-100 p-4 text-sm text-slate-800 leading-relaxed space-y-1">
+              {insightLines.map((line, index) => (
+                <div key={index}>
+                  {line.split(/(\*\*.*?\*\*)/).map((part, partIndex) =>
+                    part.startsWith('**') && part.endsWith('**') ? (
+                      <strong key={partIndex} className="font-semibold text-indigo-900">
+                        {part.slice(2, -2)}
+                      </strong>
+                    ) : (
+                      part
+                    )
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6">
       {/* Left: Data Preview */}
       <Card className="flex-1 flex flex-col overflow-hidden border-slate-200">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
@@ -235,6 +376,7 @@ export default function AnalyzePage() {
           </div>
         </div>
       </Card>
+      </div>
     </div>
   );
 }

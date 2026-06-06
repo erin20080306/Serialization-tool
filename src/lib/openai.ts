@@ -3,6 +3,7 @@ import {
   SchemaType,
   type ResponseSchema,
 } from '@google/generative-ai';
+import { buildDataProfile, formatDataProfileForPrompt } from './data-profile';
 
 // 使用 Google Gemini 作為 AI 後端
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -99,24 +100,57 @@ export async function analyzeData(
   rows: any[][],
   userQuestion?: string
 ): Promise<string> {
-  const sampleData = rows.slice(0, 5).map((row, idx) => ({
+  const profile = buildDataProfile(columns, rows);
+  const profilePrompt = formatDataProfileForPrompt(profile);
+  const sampleData = rows.slice(0, 12).map((row, idx) => ({
     row: idx + 1,
     data: columns.reduce((acc, col, i) => ({ ...acc, [col]: row[i] }), {}),
   }));
 
-  const systemPrompt = `你是一個專業的資料分析助手。使用者會提供一個試算表的欄位名稱和部分資料。
-請分析這份資料，判斷表格類型（如銷售表、庫存表、訂單表、客戶表、費用表等），
-找出重要的欄位，並提供商業洞察。
-請用繁體中文回答。`;
+  const systemPrompt = `你是一個資深資料分析師。回答必須具體、可驗證、可行動，避免空泛稱讚。
+你會收到欄位、資料剖析統計、分組排行與部分樣本。
+請用繁體中文，依照以下格式回答：
+
+**一句話結論**
+- 直接回答使用者最可能關心的結論。
+
+**關鍵數字**
+- 列出 3-5 個有數字依據的觀察，必須引用欄位名稱與數值。
+
+**異常與風險**
+- 如果資料不足以判斷，明確說「目前資料不足以判定」，並說需要哪個欄位。
+- 如果有可能異常，說明原因與建議檢查方式。
+
+**下一步建議**
+- 給 2-4 個可以馬上做的分析或營運動作。
+
+規則：
+- 不要假裝知道未提供的資料。
+- 不要只重述欄位名稱。
+- 若使用者問特定問題，優先回答該問題，再補充相關洞察。`;
 
   const userPrompt = userQuestion
-    ? `欄位：${columns.join(', ')}\n\n範例資料：\n${JSON.stringify(sampleData, null, 2)}\n\n使用者問題：${userQuestion}`
-    : `欄位：${columns.join(', ')}\n\n範例資料：\n${JSON.stringify(sampleData, null, 2)}\n\n請分析這份資料表，說明：1. 這是什麼類型的表格 2. 哪些欄位最重要 3. 有什麼商業洞察`;
+    ? `欄位：${columns.join(', ')}
+
+${profilePrompt}
+
+範例資料：
+${JSON.stringify(sampleData, null, 2)}
+
+使用者問題：${userQuestion}`
+    : `欄位：${columns.join(', ')}
+
+${profilePrompt}
+
+範例資料：
+${JSON.stringify(sampleData, null, 2)}
+
+請產生一份報表式資料分析摘要，包含資料類型、關鍵指標、分組排行、異常風險與下一步建議。`;
 
   try {
     const text = await geminiGenerate(systemPrompt, userPrompt, {
-      temperature: 0.7,
-      maxOutputTokens: 1000,
+      temperature: 0.35,
+      maxOutputTokens: 1400,
     });
     return text || '無法產生分析結果';
   } catch (error) {

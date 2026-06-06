@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeColumns, detectTableType, findAnomalies } from '@/lib/excel-parser';
 import { analyzeData } from '@/lib/openai';
+import { buildDataProfile } from '@/lib/data-profile';
 
 // POST /api/analyze - 對資料集進行欄位分析 + AI 洞察
 export async function POST(req: NextRequest) {
@@ -15,6 +16,7 @@ export async function POST(req: NextRequest) {
     const columnAnalysis = analyzeColumns(columns, rows);
     const tableType = detectTableType(columns, rows);
     const anomalies = findAnomalies(columns, rows);
+    const profile = buildDataProfile(columns, rows);
 
     // 嘗試取得 AI 洞察；若無 OpenAI key 則優雅降級
     let insights: string | undefined;
@@ -28,6 +30,7 @@ export async function POST(req: NextRequest) {
       columnAnalysis,
       tableType,
       anomalies,
+      profile,
       insights,
     });
   } catch (error) {
