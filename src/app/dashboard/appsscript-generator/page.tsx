@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Terminal, FileCode2, Loader2 } from 'lucide-react';
+import { getSelectedModel } from '@/lib/client-model';
 
 interface ScriptResult {
   code: string;
@@ -39,12 +40,15 @@ export default function AppsScriptGeneratorPage() {
       const response = await fetch('/api/generate-appsscript', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, model: getSelectedModel() }),
       });
 
       if (response.ok) {
         const data = await response.json();
         setResult(data);
+      } else if (response.status === 402) {
+        const data = await response.json().catch(() => ({}));
+        alert(data.message || '點數不足，請至「設定」頁升級方案。');
       } else {
         alert('Apps Script 產生失敗，請稍後再試');
       }

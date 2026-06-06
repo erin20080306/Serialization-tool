@@ -5,12 +5,22 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getSelectedModel } from '@/lib/client-model';
 
 interface Message {
   role: 'user' | 'assistant';
   text: string;
+}
+
+interface SheetData {
+  sheetName: string;
+  columns: string[];
+  rows: any[][];
+  rowCount?: number;
+  columnCount?: number;
+  tableType?: string;
 }
 
 interface Data {
@@ -20,6 +30,8 @@ interface Data {
   fileName?: string;
   tableType?: string;
   columnAnalysis?: any[];
+  sheets?: SheetData[];
+  sheetCount?: number;
 }
 
 interface AnalysisResult {
@@ -52,24 +64,61 @@ export default function AnalyzePage() {
   const [isTyping, setIsTyping] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [sheets, setSheets] = useState<SheetData[]>([]);
+  const [activeSheet, setActiveSheet] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const storedData = sessionStorage.getItem('uploadedData');
     if (storedData) {
       const parsedData = JSON.parse(storedData) as Data;
-      setData(parsedData);
-      setMessages([
-        {
-          role: 'assistant',
-          text: `我已載入這份「${parsedData.tableType || '資料表'}」，共有 ${parsedData.rows.length} 筆、${parsedData.columns.length} 個欄位。我會先產生報表分析摘要；你也可以直接問我「哪些項目最高？」「異常在哪？」「下一步該看什麼？」`,
-        },
-      ]);
-      void loadAnalysis(parsedData);
+      // 支援多分頁：若有 sheets 用它，否則用單頁
+      const sheetList: SheetData[] =
+        parsedData.sheets && parsedData.sheets.length > 0
+          ? parsedData.sheets
+          : [
+              {
+                sheetName: parsedData.sheetName || '工作表1',
+                columns: parsedData.columns,
+                rows: parsedData.rows,
+              },
+            ];
+      setSheets(sheetList);
+      setActiveSheet(0);
+      activateSheet(parsedData, sheetList, 0);
     } else {
       router.push('/dashboard/upload');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
+
+  const activateSheet = (base: Data, sheetList: SheetData[], index: number) => {
+    const sheet = sheetList[index];
+    const nextData: Data = {
+      ...base,
+      columns: sheet.columns,
+      rows: sheet.rows,
+      sheetName: sheet.sheetName,
+      tableType: sheet.tableType || base.tableType,
+    };
+    setData(nextData);
+    setMessages([
+      {
+        role: 'assistant',
+        text: `我已載入分頁「${sheet.sheetName}」（共 ${sheet.rows.length} 筆、${sheet.columns.length} 個欄位）。${
+          sheetList.length > 1 ? `此檔案共有 ${sheetList.length} 個分頁，可在上方切換逐頁分析。` : ''
+        }我會先產生報表分析摘要；你也可以直接問我「哪個客戶營業額最高？」「異常在哪？」`,
+      },
+    ]);
+    void loadAnalysis(nextData);
+  };
+
+  const handleSheetChange = (index: number) => {
+    if (!data || index === activeSheet) return;
+    setActiveSheet(index);
+    setAnalysis(null);
+    activateSheet(data, sheets, index);
+  };
 
   const loadAnalysis = async (targetData: Data) => {
     setAnalysisLoading(true);
@@ -80,6 +129,7 @@ export default function AnalyzePage() {
         body: JSON.stringify({
           columns: targetData.columns,
           rows: targetData.rows,
+          model: getSelectedModel(),
         }),
       });
 
@@ -118,12 +168,22 @@ export default function AnalyzePage() {
           question: userMsg,
           columns: data.columns,
           rows: data.rows,
+          model: getSelectedModel(),
         }),
       });
 
       if (response.ok) {
         const result = await response.json();
         setMessages((prev) => [...prev, { role: 'assistant', text: result.answer }]);
+      } else if (response.status === 402) {
+        const result = await response.json().catch(() => ({}));
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: result.message || '點數不足，請至「設定」頁升級方案。',
+          },
+        ]);
       } else {
         setMessages((prev) => [
           ...prev,
@@ -168,9 +228,36 @@ export default function AnalyzePage() {
       .slice(0, 10) ?? [];
 
   return (
-    <div className="h-full grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-6">
-      {/* Left column: summary + data preview (scrollable) */}
-      <div className="flex flex-col gap-6 min-h-0 lg:overflow-y-auto lg:pr-1">
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
+      {/* Left column: summary + data preview (頁面自然捲動，避免內層卡死) */}
+      <div className="flex flex-col gap-6 min-w-0">
+      {sheets.length > 1 && (
+        <Card className="border-slate-200 p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Layers className="w-4 h-4 text-indigo-600" />
+            <span className="text-sm font-semibold text-slate-800">
+              分頁切換（共 {sheets.length} 個）
+            </span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {sheets.map((sheet, index) => (
+              <button
+                key={`${sheet.sheetName}-${index}`}
+                onClick={() => handleSheetChange(index)}
+                disabled={analysisLoading}
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                  index === activeSheet
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {sheet.sheetName}
+                <span className="ml-1 opacity-70">({sheet.rows.length})</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
       <Card className="border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -253,17 +340,17 @@ export default function AnalyzePage() {
       </Card>
 
       {/* Data Preview */}
-      <Card className="flex-1 min-h-[280px] flex flex-col overflow-hidden border-slate-200">
+      <Card className="flex flex-col overflow-hidden border-slate-200">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-slate-500" />
             <h3 className="font-semibold text-sm">
-              資料預覽 (來源：{data.fileName || data.sheetName})
+              資料預覽 (分頁：{data.sheetName} ｜ 來源：{data.fileName})
             </h3>
           </div>
           <Badge variant="default">已解析 {data.rows.length} 筆</Badge>
         </div>
-        <div className="flex-1 overflow-auto p-0">
+        <div className="max-h-[420px] overflow-auto p-0">
           <table className="w-full text-sm text-left whitespace-nowrap">
             <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm">
               <tr>
@@ -290,8 +377,8 @@ export default function AnalyzePage() {
       </Card>
       </div>
 
-      {/* Right column: AI Chat (full height, not pushed down by summary) */}
-      <Card className="flex flex-col overflow-hidden border-indigo-100 shadow-md min-h-[500px] lg:h-full lg:sticky lg:top-0">
+      {/* Right column: AI Chat (sticky 自帶高度，不被摘要往下擠) */}
+      <Card className="flex flex-col overflow-hidden border-indigo-100 shadow-md h-[600px] lg:sticky lg:top-0 lg:self-start lg:h-[calc(100vh-8rem)]">
         <div className="p-4 border-b border-slate-100 bg-indigo-50/50 flex items-center gap-2">
           <Bot className="w-5 h-5 text-indigo-600" />
           <h3 className="font-semibold text-indigo-900">AI 資料助理</h3>

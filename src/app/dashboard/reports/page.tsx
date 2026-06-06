@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { BarChart3, CheckCircle2, Database, Download, FileText, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { getSelectedModel } from '@/lib/client-model';
 
 interface Data {
   columns: string[];
@@ -43,6 +44,7 @@ export default function ReportsPage() {
         body: JSON.stringify({
           columns: targetData.columns,
           rows: targetData.rows,
+          model: getSelectedModel(),
         }),
       });
 

@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { MessageSquare, Sparkles, Loader2, FileJson } from 'lucide-react';
+import { getSelectedModel } from '@/lib/client-model';
 
 interface FormulaResult {
   formula: string;
@@ -40,12 +41,15 @@ export default function FormulaGeneratorPage() {
       const response = await fetch('/api/generate-formula', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, columns }),
+        body: JSON.stringify({ prompt, columns, model: getSelectedModel() }),
       });
 
       if (response.ok) {
         const data = await response.json();
         setResult(data);
+      } else if (response.status === 402) {
+        const data = await response.json().catch(() => ({}));
+        alert(data.message || '點數不足，請至「設定」頁升級方案。');
       } else {
         alert('公式產生失敗，請稍後再試');
       }

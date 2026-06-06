@@ -4,10 +4,12 @@ import {
   type ResponseSchema,
 } from '@google/generative-ai';
 import { buildDataProfile, formatDataProfileForPrompt, type DataProfile } from './data-profile';
+import { DEFAULT_MODEL, resolveModel, type ModelId } from './models';
 
 // 使用 Google Gemini 作為 AI 後端
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+// 預設模型：環境變數 > 程式預設 (gemini-2.5-flash)
+const ENV_MODEL = resolveModel(process.env.GEMINI_MODEL) || DEFAULT_MODEL;
 
 // 共用呼叫函式：以 systemInstruction + 使用者輸入呼叫 Gemini
 async function geminiGenerate(
@@ -18,10 +20,11 @@ async function geminiGenerate(
     maxOutputTokens?: number;
     json?: boolean;
     responseSchema?: ResponseSchema;
+    model?: ModelId;
   } = {}
 ): Promise<string> {
   const model = genAI.getGenerativeModel({
-    model: MODEL_NAME,
+    model: options.model || ENV_MODEL,
     systemInstruction: systemPrompt,
     generationConfig: {
       temperature: options.temperature ?? 0.7,
@@ -173,7 +176,8 @@ const reportInsightsSchema: ResponseSchema = {
 export async function analyzeData(
   columns: string[],
   rows: any[][],
-  userQuestion?: string
+  userQuestion?: string,
+  model?: ModelId
 ): Promise<string> {
   const profile = buildDataProfile(columns, rows);
   const profilePrompt = formatDataProfileForPrompt(profile);
@@ -234,14 +238,16 @@ ${JSON.stringify(sampleData, null, 2)}
     const text = await geminiGenerate(systemPrompt, userPrompt, {
       temperature: 0.35,
       maxOutputTokens: 1400,
+      model,
     });
     if (!text || looksIncompleteAnalysis(text)) {
       return buildDeterministicAnalysis(profile, userQuestion);
     }
     return text;
   } catch (error) {
+    // Gemini 失敗（含截斷/超時）時，用統計結果產生 fallback，避免回半段答案
     console.error('Gemini API error:', error);
-    throw new Error('AI 分析失敗，請稍後再試');
+    return buildDeterministicAnalysis(profile, userQuestion);
   }
 }
 
@@ -249,7 +255,8 @@ ${JSON.stringify(sampleData, null, 2)}
 export async function generateFormula(
   prompt: string,
   columns?: string[],
-  platform: 'excel' | 'google_sheets' | 'both' = 'both'
+  platform: 'excel' | 'google_sheets' | 'both' = 'both',
+  model?: ModelId
 ): Promise<{
   formula: string;
   platform: string;
@@ -276,6 +283,7 @@ export async function generateFormula(
       maxOutputTokens: 800,
       json: true,
       responseSchema: formulaSchema,
+      model,
     });
     const result = parseGeminiJson<{
       formula: string;
@@ -294,7 +302,8 @@ export async function generateFormula(
 // Generate Google Apps Script
 export async function generateAppsScript(
   prompt: string,
-  context?: string
+  context?: string,
+  model?: ModelId
 ): Promise<{
   code: string;
   instructions: string[];
@@ -313,6 +322,7 @@ export async function generateAppsScript(
     const text = await geminiGenerate(systemPrompt, userPrompt, {
       temperature: 0.3,
       maxOutputTokens: 1500,
+      model,
     });
     const code = stripCodeFence(text);
 
@@ -341,7 +351,8 @@ export async function generateAppsScript(
 // Generate report insights
 export async function generateReportInsights(
   columns: string[],
-  rows: any[][]
+  rows: any[][],
+  model?: ModelId
 ): Promise<{
   summary: string;
   keyFindings: string[];
@@ -367,6 +378,7 @@ export async function generateReportInsights(
       maxOutputTokens: 1000,
       json: true,
       responseSchema: reportInsightsSchema,
+      model,
     });
     const result = parseGeminiJson<{
       summary: string;
