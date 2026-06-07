@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getSelectedModel } from '@/lib/client-model';
 
@@ -147,6 +147,96 @@ function buildChartFromData(columns: string[], rows: any[][], msg: string): Char
     data: entries,
   };
 }
+
+interface Highlight {
+  icon: 'trophy' | 'target' | 'alert' | 'gauge' | 'database';
+  label: string;
+  value: string;
+  detail?: string;
+  tone: 'indigo' | 'emerald' | 'amber' | 'rose';
+}
+
+// 由統計結果即時合成「重點摘要」：一句總結 + 可行動的重點卡（不需 AI、即時可靠）
+function buildHighlights(
+  analysis: AnalysisResult | null,
+  data: Data
+): { headline: string; items: Highlight[] } | null {
+  if (!analysis?.profile) return null;
+  const p = analysis.profile;
+  const items: Highlight[] = [];
+
+  items.push({
+    icon: 'database',
+    label: '資料規模',
+    value: `${p.rowCount.toLocaleString()} 筆 × ${p.columnCount} 欄`,
+    detail: data.sheetName ? `分頁：${data.sheetName}` : undefined,
+    tone: 'indigo',
+  });
+
+  let headline = `這份資料共 ${p.rowCount.toLocaleString()} 筆紀錄`;
+
+  const top = p.categoryMetrics?.[0];
+  if (top && top.topRows.length) {
+    const totalSum = top.topRows.reduce((s, r) => s + (r.total > 0 ? r.total : 0), 0);
+    const first = top.topRows[0];
+    const share = totalSum > 0 ? (first.total / totalSum) * 100 : 0;
+    items.push({
+      icon: 'trophy',
+      label: `最高 ${top.metricColumn}`,
+      value: `${first.value}：${first.total.toLocaleString()}`,
+      detail: `依「${top.categoryColumn}」分組，占前 ${top.topRows.length} 名約 ${share.toFixed(0)}%`,
+      tone: 'emerald',
+    });
+    headline += `，「${first.value}」的${top.metricColumn}最高（${first.total.toLocaleString()}）`;
+    if (share >= 50) {
+      items.push({
+        icon: 'target',
+        label: '集中度偏高',
+        value: `前 1 名占 ${share.toFixed(0)}%`,
+        detail: '高度集中於少數項目，建議分散風險或聚焦主力。',
+        tone: 'amber',
+      });
+    }
+  }
+
+  const anomalies = analysis.anomalies ?? [];
+  if (anomalies.length) {
+    const a = anomalies[0];
+    items.push({
+      icon: 'alert',
+      label: '異常提示',
+      value: `${anomalies.length} 筆需留意`,
+      detail: `例如第 ${a.row} 列「${a.column}」=${a.value}：${a.reason}`,
+      tone: 'rose',
+    });
+    headline += `；偵測到 ${anomalies.length} 筆異常值需檢查`;
+  } else {
+    headline += '；未偵測到明顯異常';
+  }
+
+  const numericCols = p.columns.filter((c) => c.numeric);
+  if (numericCols.length && numericCols[0].numeric) {
+    const nc = numericCols[0];
+    items.push({
+      icon: 'gauge',
+      label: `${nc.name} 概況`,
+      value: `平均 ${Math.round(nc.numeric!.average).toLocaleString()}`,
+      detail: `最小 ${nc.numeric!.min.toLocaleString()} / 最大 ${nc.numeric!.max.toLocaleString()}`,
+      tone: 'indigo',
+    });
+  }
+
+  headline += '。';
+  return { headline, items: items.slice(0, 5) };
+}
+
+const HIGHLIGHT_ICON = { trophy: Trophy, target: Target, alert: AlertTriangle, gauge: Gauge, database: Database };
+const HIGHLIGHT_TONE: Record<Highlight['tone'], string> = {
+  indigo: 'text-indigo-600 bg-indigo-100',
+  emerald: 'text-emerald-600 bg-emerald-100',
+  amber: 'text-amber-600 bg-amber-100',
+  rose: 'text-rose-600 bg-rose-100',
+};
 
 export default function AnalyzePage() {
   const router = useRouter();
@@ -352,11 +442,61 @@ export default function AnalyzePage() {
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
       .slice(0, 10) ?? [];
+  const highlights = buildHighlights(analysis, data);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
       {/* Left column: summary + data preview (頁面自然捲動，避免內層卡死) */}
       <div className="flex flex-col gap-6 min-w-0">
+      {/* 重點摘要：AI Data Analyst 風格的可行動總結 */}
+      <Card className="border-indigo-100 overflow-hidden">
+        <div className="p-4 bg-gradient-to-r from-indigo-600 to-violet-600 text-white flex items-center gap-2">
+          <Lightbulb className="w-5 h-5" />
+          <div>
+            <h3 className="font-semibold">重點摘要</h3>
+            <p className="text-xs text-indigo-100">把資料轉成可行動的重點，免 SQL、免公式</p>
+          </div>
+        </div>
+        {analysisLoading && !highlights ? (
+          <div className="p-6 flex items-center gap-2 text-slate-500 text-sm">
+            <Loader2 className="w-4 h-4 animate-spin" /> 正在整理重點摘要...
+          </div>
+        ) : highlights ? (
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-slate-700 leading-relaxed bg-indigo-50/60 rounded-lg p-3">
+              {highlights.headline}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {highlights.items.map((item, idx) => {
+                const Icon = HIGHLIGHT_ICON[item.icon];
+                return (
+                  <div key={idx} className="flex gap-3 rounded-lg border border-slate-200 p-3">
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${HIGHLIGHT_TONE[item.tone]}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs text-slate-500">{item.label}</div>
+                      <div className="text-sm font-semibold text-slate-900 truncate" title={item.value}>
+                        {item.value}
+                      </div>
+                      {item.detail && (
+                        <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{item.detail}</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-slate-400">
+              想深入了解？在右側用聊天問「哪個產品賣最好？」「幫我找異常值」「幫我做圖表」。
+            </p>
+          </div>
+        ) : (
+          <div className="p-6 text-sm text-slate-500">
+            載入資料後即可看到重點摘要。建議資料含分類（如產品、客戶）與數值（如金額、數量）欄位，摘要會更精準。
+          </div>
+        )}
+      </Card>
       {sheets.length > 1 && (
         <Card className="border-slate-200 p-3">
           <div className="flex items-center gap-2 mb-2">
