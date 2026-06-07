@@ -175,6 +175,29 @@ const formulaSchema: ResponseSchema = {
   required: ['formula', 'platform', 'description', 'assumptions'],
 };
 
+const explainFormulaSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    summary: { type: SchemaType.STRING },
+    breakdown: stringArraySchema,
+    example: { type: SchemaType.STRING },
+    caveats: stringArraySchema,
+  },
+  required: ['summary', 'breakdown'],
+};
+
+const fixFormulaSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    fixedFormula: { type: SchemaType.STRING },
+    platform: { type: SchemaType.STRING },
+    diagnosis: { type: SchemaType.STRING },
+    changes: stringArraySchema,
+    tips: stringArraySchema,
+  },
+  required: ['fixedFormula', 'diagnosis', 'changes'],
+};
+
 const reportInsightsSchema: ResponseSchema = {
   type: SchemaType.OBJECT,
   properties: {
@@ -309,6 +332,98 @@ export async function generateFormula(
   } catch (error) {
     console.error('Gemini API error:', error);
     throw new Error('公式產生失敗，請稍後再試');
+  }
+}
+
+// 解釋既有公式：用白話拆解每個部分在做什麼
+export async function explainFormula(
+  formula: string,
+  platform: 'excel' | 'google_sheets' | 'both' = 'both',
+  model?: ModelId
+): Promise<{
+  summary: string;
+  breakdown: string[];
+  example?: string;
+  caveats?: string[];
+}> {
+  const systemPrompt = `你是一個 Excel 和 Google Sheets 公式專家。使用者會貼上一段公式，
+請用白話、循序漸進的方式解釋它在做什麼。回傳格式必須是 JSON，包含：
+- summary: 一句話總結這個公式的用途
+- breakdown: 逐步拆解陣列，每個元素說明公式中的一個函式或片段（由內而外或由左而右），盡量引用實際函式名稱
+- example: 一個具體的輸入/輸出範例（可選）
+- caveats: 常見陷阱或注意事項陣列（可選，例如資料型別、空白、相對/絕對參照）
+請用繁體中文回答。`;
+
+  const userPrompt = `平台：${platform}\n\n請解釋這個公式：\n${formula}`;
+
+  try {
+    const text = await geminiGenerate(systemPrompt, userPrompt, {
+      temperature: 0.3,
+      maxOutputTokens: 1200,
+      json: true,
+      responseSchema: explainFormulaSchema,
+      model,
+    });
+    return parseGeminiJson<{
+      summary: string;
+      breakdown: string[];
+      example?: string;
+      caveats?: string[];
+    }>(text || '{}');
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    throw new Error('公式解釋失敗，請稍後再試');
+  }
+}
+
+// 修正公式錯誤：診斷問題並回傳修正後的公式
+export async function fixFormula(
+  formula: string,
+  problem?: string,
+  columns?: string[],
+  platform: 'excel' | 'google_sheets' | 'both' = 'both',
+  model?: ModelId
+): Promise<{
+  fixedFormula: string;
+  platform: string;
+  diagnosis: string;
+  changes: string[];
+  tips?: string[];
+}> {
+  const systemPrompt = `你是一個 Excel 和 Google Sheets 公式除錯專家。使用者會貼上一段有問題的公式
+（可能出現 #REF!、#VALUE!、#DIV/0!、#N/A、#NAME?、#NUM!、邏輯錯誤或結果不如預期）。
+請找出錯誤原因並修正。回傳格式必須是 JSON，包含：
+- fixedFormula: 修正後可直接使用的公式
+- platform: 適用平台 (Excel, Google Sheets, 或 both)
+- diagnosis: 問題診斷（為什麼會錯）
+- changes: 你做了哪些修改的陣列（具體說明改了什麼）
+- tips: 避免再次發生的建議陣列（可選）
+請用繁體中文回答。`;
+
+  const parts = [`平台：${platform}`];
+  if (columns?.length) parts.push(`可用欄位：${columns.join(', ')}`);
+  if (problem) parts.push(`使用者描述的問題：${problem}`);
+  parts.push(`有問題的公式：\n${formula}`);
+  const userPrompt = parts.join('\n\n');
+
+  try {
+    const text = await geminiGenerate(systemPrompt, userPrompt, {
+      temperature: 0.3,
+      maxOutputTokens: 1200,
+      json: true,
+      responseSchema: fixFormulaSchema,
+      model,
+    });
+    return parseGeminiJson<{
+      fixedFormula: string;
+      platform: string;
+      diagnosis: string;
+      changes: string[];
+      tips?: string[];
+    }>(text || '{}');
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    throw new Error('公式修正失敗，請稍後再試');
   }
 }
 
