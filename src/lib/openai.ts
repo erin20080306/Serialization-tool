@@ -3,25 +3,64 @@ import {
   SchemaType,
   type ResponseSchema,
 } from '@google/generative-ai';
+import OpenAI from 'openai';
 import { buildDataProfile, formatDataProfileForPrompt, type DataProfile } from './data-profile';
-import { DEFAULT_MODEL, resolveModel, type ModelId } from './models';
+import { DEFAULT_MODEL, resolveModel, getModelProvider, type ModelId } from './models';
 
-// 使用 Google Gemini 作為 AI 後端
+// AI 後端：Google Gemini 與 OpenAI 並存，依模型 provider 路由
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 // 預設模型：環境變數 > 程式預設 (gemini-2.5-flash)
 const ENV_MODEL = resolveModel(process.env.GEMINI_MODEL) || DEFAULT_MODEL;
+
+interface GenerateOptions {
+  temperature?: number;
+  maxOutputTokens?: number;
+  json?: boolean;
+  responseSchema?: ResponseSchema;
+  model?: ModelId;
+}
+
+// 統一入口：依模型 provider 決定呼叫 Gemini 或 OpenAI
+async function aiGenerate(
+  systemPrompt: string,
+  userPrompt: string,
+  options: GenerateOptions = {}
+): Promise<string> {
+  const selectedModel = options.model || ENV_MODEL;
+  if (getModelProvider(selectedModel) === 'openai') {
+    return openaiGenerate(systemPrompt, userPrompt, selectedModel, options);
+  }
+  return geminiGenerate(systemPrompt, userPrompt, { ...options, model: selectedModel });
+}
+
+// 以 OpenAI Chat Completions 產生回應
+async function openaiGenerate(
+  systemPrompt: string,
+  userPrompt: string,
+  model: ModelId,
+  options: GenerateOptions
+): Promise<string> {
+  // JSON 模式需要 prompt 內含 "json" 字樣，系統提示已要求 JSON 格式
+  const completion = await openai.chat.completions.create({
+    model,
+    temperature: options.temperature ?? 0.7,
+    max_tokens: options.maxOutputTokens ?? 1000,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    ...(options.json ? { response_format: { type: 'json_object' as const } } : {}),
+  });
+
+  return completion.choices[0]?.message?.content ?? '';
+}
 
 // 共用呼叫函式：以 systemInstruction + 使用者輸入呼叫 Gemini
 async function geminiGenerate(
   systemPrompt: string,
   userPrompt: string,
-  options: {
-    temperature?: number;
-    maxOutputTokens?: number;
-    json?: boolean;
-    responseSchema?: ResponseSchema;
-    model?: ModelId;
-  } = {}
+  options: GenerateOptions = {}
 ): Promise<string> {
   const selectedModel = options.model || ENV_MODEL;
   // Gemini 2.5 Pro 強制以「思考模式」運作，無法將 thinkingBudget 設為 0；
@@ -271,7 +310,7 @@ ${JSON.stringify(sampleData, null, 2)}
 請產生一份報表式資料分析摘要，包含資料類型、關鍵指標、分組排行、異常風險與下一步建議。`;
 
   try {
-    const text = await geminiGenerate(systemPrompt, userPrompt, {
+    const text = await aiGenerate(systemPrompt, userPrompt, {
       temperature: 0.35,
       maxOutputTokens: 1400,
       model,
@@ -314,7 +353,7 @@ export async function generateFormula(
     : `需求：${prompt}\n\n平台偏好：${platform}`;
 
   try {
-    const text = await geminiGenerate(systemPrompt, userPrompt, {
+    const text = await aiGenerate(systemPrompt, userPrompt, {
       temperature: 0.3,
       maxOutputTokens: 800,
       json: true,
@@ -357,7 +396,7 @@ export async function explainFormula(
   const userPrompt = `平台：${platform}\n\n請解釋這個公式：\n${formula}`;
 
   try {
-    const text = await geminiGenerate(systemPrompt, userPrompt, {
+    const text = await aiGenerate(systemPrompt, userPrompt, {
       temperature: 0.3,
       maxOutputTokens: 1200,
       json: true,
@@ -407,7 +446,7 @@ export async function fixFormula(
   const userPrompt = parts.join('\n\n');
 
   try {
-    const text = await geminiGenerate(systemPrompt, userPrompt, {
+    const text = await aiGenerate(systemPrompt, userPrompt, {
       temperature: 0.3,
       maxOutputTokens: 1200,
       json: true,
@@ -447,7 +486,7 @@ export async function generateAppsScript(
     : `需求：${prompt}`;
 
   try {
-    const text = await geminiGenerate(systemPrompt, userPrompt, {
+    const text = await aiGenerate(systemPrompt, userPrompt, {
       temperature: 0.3,
       maxOutputTokens: 1500,
       model,
@@ -501,7 +540,7 @@ export async function generateReportInsights(
   const userPrompt = `欄位：${columns.join(', ')}\n\n資料（前10筆）：\n${JSON.stringify(sampleData, null, 2)}`;
 
   try {
-    const text = await geminiGenerate(systemPrompt, userPrompt, {
+    const text = await aiGenerate(systemPrompt, userPrompt, {
       temperature: 0.5,
       maxOutputTokens: 1000,
       json: true,

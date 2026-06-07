@@ -34,6 +34,8 @@ const MODEL_ICON: Record<ModelId, typeof Zap> = {
   'gemini-2.5-flash': Zap,
   'gemini-2.5-pro': Brain,
   'gemini-flash-latest': Sparkles,
+  'gpt-4o-mini': Zap,
+  'gpt-4o': Brain,
 };
 
 export default function SettingsPage() {
@@ -134,7 +136,18 @@ export default function SettingsPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <Icon className={`w-5 h-5 ${active ? 'text-indigo-600' : 'text-slate-400'}`} />
+                    <div className="flex items-center gap-2">
+                      <Icon className={`w-5 h-5 ${active ? 'text-indigo-600' : 'text-slate-400'}`} />
+                      <span
+                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          model.provider === 'openai'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-blue-100 text-blue-700'
+                        }`}
+                      >
+                        {model.provider === 'openai' ? 'OpenAI' : 'Gemini'}
+                      </span>
+                    </div>
                     {active && <Check className="w-4 h-4 text-indigo-600" />}
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2">

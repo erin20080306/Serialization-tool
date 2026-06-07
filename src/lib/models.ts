@@ -1,9 +1,18 @@
 // AI 模型註冊：定義可用模型、適合功能與每次動作的點數成本
 
-export type ModelId = 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gemini-flash-latest';
+export type ModelProvider = 'gemini' | 'openai';
+
+export type ModelId =
+  | 'gemini-2.5-flash'
+  | 'gemini-2.5-pro'
+  | 'gemini-flash-latest'
+  | 'gpt-4o-mini'
+  | 'gpt-4o';
 
 export interface ModelConfig {
   id: ModelId;
+  // 後端供應商：決定呼叫 Gemini 或 OpenAI
+  provider: ModelProvider;
   label: string;
   tagline: string;
   // 適合的功能說明
@@ -21,6 +30,7 @@ export const DEFAULT_MODEL: ModelId = 'gemini-2.5-flash';
 export const MODELS: ModelConfig[] = [
   {
     id: 'gemini-2.5-flash',
+    provider: 'gemini',
     label: 'Gemini 2.5 Flash',
     tagline: '推薦 · 速度與分析品質平衡',
     goodFor: [
@@ -36,6 +46,7 @@ export const MODELS: ModelConfig[] = [
   },
   {
     id: 'gemini-2.5-pro',
+    provider: 'gemini',
     label: 'Gemini 2.5 Pro',
     tagline: '推理最強 · 深度跨分頁分析',
     goodFor: [
@@ -51,6 +62,7 @@ export const MODELS: ModelConfig[] = [
   },
   {
     id: 'gemini-flash-latest',
+    provider: 'gemini',
     label: 'Gemini Flash (Latest)',
     tagline: '最省成本 · 最快回應',
     goodFor: [
@@ -62,6 +74,38 @@ export const MODELS: ModelConfig[] = [
     cost: '最低',
     reasoning: '基本',
     costPerAction: 20,
+  },
+  {
+    id: 'gpt-4o-mini',
+    provider: 'openai',
+    label: 'OpenAI GPT-4o mini',
+    tagline: 'OpenAI · 快速且高性價比',
+    goodFor: [
+      '日常資料分析與摘要',
+      '公式產生 / 解釋 / 修正',
+      'Apps Script 程式碼產生',
+      '需要 OpenAI 風格回答時',
+    ],
+    speed: '快',
+    cost: '中低',
+    reasoning: '良好',
+    costPerAction: 30,
+  },
+  {
+    id: 'gpt-4o',
+    provider: 'openai',
+    label: 'OpenAI GPT-4o',
+    tagline: 'OpenAI · 旗艦推理與多步分析',
+    goodFor: [
+      '複雜跨欄位 / 跨分頁推理',
+      '財務、發票異常判讀',
+      '需要最高品質的商業洞察',
+      '嚴謹數字推理的進階分析',
+    ],
+    speed: '中等',
+    cost: '較高',
+    reasoning: '最強',
+    costPerAction: 50,
   },
 ];
 
@@ -77,6 +121,11 @@ export function resolveModel(value: unknown): ModelId {
 
 export function getModelConfig(id: ModelId): ModelConfig {
   return MODELS.find((m) => m.id === id) ?? MODELS[0];
+}
+
+// 取得指定模型的後端供應商
+export function getModelProvider(value: unknown): ModelProvider {
+  return getModelConfig(resolveModel(value)).provider;
 }
 
 // 取得指定模型每次動作消耗的點數
