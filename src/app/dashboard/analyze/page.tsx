@@ -439,9 +439,9 @@ export default function AnalyzePage() {
   const insightLines =
     analysis?.insights
       ?.split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .slice(0, 10) ?? [];
+      .map((line) => line.replace(/\s+$/, ''))
+      .filter((line) => line.trim().length > 0)
+      .slice(0, 60) ?? [];
   const highlights = buildHighlights(analysis, data);
 
   return (
@@ -586,20 +586,44 @@ export default function AnalyzePage() {
 
         {insightLines.length > 0 && (
           <div className="px-4 pb-4">
-            <div className="rounded-md bg-indigo-50 border border-indigo-100 p-4 text-sm text-slate-800 leading-relaxed space-y-1">
-              {insightLines.map((line, index) => (
-                <div key={index}>
-                  {line.split(/(\*\*.*?\*\*)/).map((part, partIndex) =>
-                    part.startsWith('**') && part.endsWith('**') ? (
-                      <strong key={partIndex} className="font-semibold text-indigo-900">
-                        {part.slice(2, -2)}
-                      </strong>
-                    ) : (
-                      part
-                    )
-                  )}
-                </div>
-              ))}
+            <div className="rounded-md bg-slate-50 border border-slate-200 p-4 text-sm text-slate-800 leading-relaxed">
+              {insightLines.map((line, index) => {
+                const trimmed = line.trim();
+                const isHeader = /^\*\*.+\*\*$/.test(trimmed);
+                if (isHeader) {
+                  return (
+                    <div
+                      key={index}
+                      className="font-semibold text-indigo-900 text-[15px] mt-4 first:mt-0 pb-1 mb-1 border-b border-indigo-100"
+                    >
+                      {trimmed.slice(2, -2)}
+                    </div>
+                  );
+                }
+                // 子項目（排行用兩格縮排）保留階層
+                const indent = line.startsWith('  ');
+                const isBullet = trimmed.startsWith('- ');
+                const content = isBullet ? trimmed.slice(2) : trimmed;
+                return (
+                  <div
+                    key={index}
+                    className={`flex gap-2 ${indent ? 'pl-6' : 'pl-1'} py-0.5`}
+                  >
+                    {isBullet && <span className="text-indigo-400 shrink-0">•</span>}
+                    <span className={indent ? 'text-slate-600' : ''}>
+                      {content.split(/(\*\*.*?\*\*)/).map((part, partIndex) =>
+                        part.startsWith('**') && part.endsWith('**') ? (
+                          <strong key={partIndex} className="font-semibold text-slate-900">
+                            {part.slice(2, -2)}
+                          </strong>
+                        ) : (
+                          part
+                        )
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
