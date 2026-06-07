@@ -9,9 +9,21 @@ import { DEFAULT_MODEL, resolveModel, getModelProvider, type ModelId } from './m
 
 // AI 後端：Google Gemini 與 OpenAI 並存，依模型 provider 路由
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 // 預設模型：環境變數 > 程式預設 (gemini-2.5-flash)
 const ENV_MODEL = resolveModel(process.env.GEMINI_MODEL) || DEFAULT_MODEL;
+
+// 延遲初始化 OpenAI client：避免在缺少 OPENAI_API_KEY 時於 import/build 階段就拋錯。
+// 只有實際使用 OpenAI 模型時才會建立並檢查金鑰。
+let openaiClient: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('尚未設定 OPENAI_API_KEY，無法使用 OpenAI 模型，請改用 Gemini 模型或設定金鑰。');
+  }
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return openaiClient;
+}
 
 interface GenerateOptions {
   temperature?: number;
@@ -42,7 +54,7 @@ async function openaiGenerate(
   options: GenerateOptions
 ): Promise<string> {
   // JSON 模式需要 prompt 內含 "json" 字樣，系統提示已要求 JSON 格式
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAI().chat.completions.create({
     model,
     temperature: options.temperature ?? 0.7,
     max_tokens: options.maxOutputTokens ?? 1000,
