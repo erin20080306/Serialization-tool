@@ -9,9 +9,18 @@ import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Lay
 import { useRouter } from 'next/navigation';
 import { getSelectedModel } from '@/lib/client-model';
 
+type ChartType = 'bar' | 'pie' | 'line';
+
+interface ChartSpec {
+  type: ChartType;
+  title: string;
+  data: Array<{ label: string; value: number }>;
+}
+
 interface Message {
   role: 'user' | 'assistant';
   text: string;
+  chart?: ChartSpec;
 }
 
 interface SheetData {
@@ -54,6 +63,89 @@ interface AnalysisResult {
     }>;
   };
   insights?: string;
+}
+
+// 偵測使用者是否在要求畫圖表
+const CHART_KEYWORDS = ['圖', '圖表', '畫', '繪', '視覺', 'chart', 'plot', '長條', '柱狀', '圓餅', '派', 'pie', '折線', '趨勢', 'line', 'bar', '分布', '佔比'];
+function wantsChart(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return CHART_KEYWORDS.some((k) => lower.includes(k.toLowerCase()));
+}
+
+function detectChartType(msg: string): ChartType {
+  const lower = msg.toLowerCase();
+  if (/圓餅|派|pie|佔比|比例/.test(lower)) return 'pie';
+  if (/折線|趨勢|line|走勢|變化/.test(lower)) return 'line';
+  return 'bar';
+}
+
+function toNumber(v: any): number {
+  if (typeof v === 'number') return v;
+  if (v == null) return NaN;
+  return Number(String(v).replace(/[, ]/g, ''));
+}
+
+// 從資料與使用者訊息建立圖表規格（純前端、不需 AI、不扣點）
+function buildChartFromData(columns: string[], rows: any[][], msg: string): ChartSpec | null {
+  if (!columns.length || !rows.length) return null;
+
+  const colIsNumeric = columns.map((_, ci) => {
+    const vals = rows.map((r) => toNumber(r[ci])).filter((n) => Number.isFinite(n));
+    return vals.length >= Math.max(2, rows.length * 0.5);
+  });
+
+  // 使用者訊息中若提到欄位名稱，優先採用
+  const mentioned = columns
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => c && msg.includes(c));
+  const mentionedNumeric = mentioned.find(({ i }) => colIsNumeric[i]);
+  const mentionedText = mentioned.find(({ i }) => !colIsNumeric[i]);
+
+  const metricIndex = mentionedNumeric?.i ?? colIsNumeric.findIndex(Boolean);
+  if (metricIndex < 0) return null;
+  const categoryIndex =
+    mentionedText?.i ??
+    colIsNumeric.findIndex((isNum, i) => !isNum && i !== metricIndex);
+
+  const type = detectChartType(msg);
+
+  // 折線圖：依資料列順序呈現指標（適合時間/序列）
+  if (type === 'line' || categoryIndex < 0) {
+    const points = rows
+      .map((r, idx) => ({
+        label: categoryIndex >= 0 ? String(r[categoryIndex] ?? idx + 1) : `第${idx + 1}列`,
+        value: toNumber(r[metricIndex]),
+      }))
+      .filter((p) => Number.isFinite(p.value))
+      .slice(0, 40);
+    if (!points.length) return null;
+    return {
+      type: 'line',
+      title: `「${columns[metricIndex]}」${categoryIndex >= 0 ? `（依${columns[categoryIndex]}）` : '走勢'}`,
+      data: points,
+    };
+  }
+
+  // 長條 / 圓餅：依分類彙總指標
+  const totals = new Map<string, number>();
+  for (const r of rows) {
+    const key = String(r[categoryIndex] ?? '（空白）');
+    const val = toNumber(r[metricIndex]);
+    if (!Number.isFinite(val)) continue;
+    totals.set(key, (totals.get(key) ?? 0) + val);
+  }
+  let entries = Array.from(totals.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  if (type === 'pie') entries = entries.filter((e) => e.value > 0);
+  entries = entries.slice(0, 8);
+  if (!entries.length) return null;
+
+  return {
+    type,
+    title: `依「${columns[categoryIndex]}」彙總「${columns[metricIndex]}」`,
+    data: entries,
+  };
 }
 
 export default function AnalyzePage() {
@@ -158,6 +250,32 @@ export default function AnalyzePage() {
     const userMsg = input;
     setMessages((prev) => [...prev, { role: 'user', text: userMsg }]);
     setInput('');
+
+    // 圖表請求：直接用前端資料產生圖表，不呼叫 AI、不扣點
+    if (wantsChart(userMsg)) {
+      const chart = buildChartFromData(data.columns, data.rows, userMsg);
+      if (chart) {
+        const typeLabel = chart.type === 'pie' ? '圓餅圖' : chart.type === 'line' ? '折線圖' : '長條圖';
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            text: `這是依你的需求產生的${typeLabel}：${chart.title}。若想換成其他欄位或圖型（長條／圓餅／折線），直接告訴我即可。`,
+            chart,
+          },
+        ]);
+        return;
+      }
+      // 無法產生圖表（例如沒有數值欄位）時，提示並改用 AI 回答
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          text: '這份資料目前找不到可繪圖的數值欄位，我改用文字幫你分析。',
+        },
+      ]);
+    }
+
     setIsTyping(true);
 
     try {
@@ -511,6 +629,11 @@ export default function AnalyzePage() {
                     )}
                   </div>
                 ))}
+                {msg.chart && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <ChatChart spec={msg.chart} />
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -556,7 +679,7 @@ export default function AnalyzePage() {
             </Button>
           </div>
           <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
-            {['哪些商品賣最好？', '幫我找出異常', '產生週報大綱'].map((suggestion) => (
+            {['哪些商品賣最好？', '幫我畫長條圖', '幫我做圓餅圖', '幫我找出異常'].map((suggestion) => (
               <Badge
                 key={suggestion}
                 variant="secondary"
@@ -629,6 +752,82 @@ function PieChart({ slices }: { slices: Array<{ label: string; value: number }> 
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// 聊天中的圖表：依規格渲染長條 / 圓餅 / 折線
+function ChatChart({ spec }: { spec: ChartSpec }) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-slate-600 mb-2">{spec.title}</div>
+      {spec.type === 'pie' ? (
+        <PieChart slices={spec.data.map((d) => ({ label: d.label, value: d.value }))} />
+      ) : spec.type === 'line' ? (
+        <LineChart points={spec.data} />
+      ) : (
+        <BarChart bars={spec.data} />
+      )}
+    </div>
+  );
+}
+
+function BarChart({ bars }: { bars: Array<{ label: string; value: number }> }) {
+  const max = Math.max(...bars.map((b) => Math.abs(b.value)), 1);
+  return (
+    <div className="space-y-1.5">
+      {bars.map((b, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div className="w-20 shrink-0 truncate text-[11px] text-slate-600" title={b.label}>
+            {b.label}
+          </div>
+          <div className="flex-1 bg-slate-100 rounded h-5 overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 rounded flex items-center justify-end pr-2"
+              style={{ width: `${Math.max((Math.abs(b.value) / max) * 100, 4)}%` }}
+            >
+              <span className="text-[10px] text-white font-medium whitespace-nowrap">
+                {b.value.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LineChart({ points }: { points: Array<{ label: string; value: number }> }) {
+  if (points.length < 2) return <BarChart bars={points} />;
+  const w = 320;
+  const h = 140;
+  const pad = 8;
+  const values = points.map((p) => p.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = (w - pad * 2) / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = pad + i * stepX;
+    const y = h - pad - ((p.value - min) / range) * (h - pad * 2);
+    return { x, y };
+  });
+  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-36">
+        <path d={path} fill="none" stroke="#6366f1" strokeWidth="2" />
+        {coords.map((c, i) => (
+          <circle key={i} cx={c.x} cy={c.y} r="2.5" fill="#6366f1" />
+        ))}
+      </svg>
+      <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+        <span className="truncate max-w-[45%]" title={points[0].label}>{points[0].label}</span>
+        <span className="truncate max-w-[45%] text-right" title={points[points.length - 1].label}>
+          {points[points.length - 1].label}
+        </span>
       </div>
     </div>
   );
