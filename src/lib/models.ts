@@ -7,7 +7,8 @@ export type ModelId =
   | 'gemini-2.5-pro'
   | 'gemini-flash-latest'
   | 'gpt-4o-mini'
-  | 'gpt-4o';
+  | 'gpt-4o'
+  | 'gpt-5.5';
 
 export interface ModelConfig {
   id: ModelId;
@@ -106,6 +107,22 @@ export const MODELS: ModelConfig[] = [
     cost: '較高',
     reasoning: '最強',
     costPerAction: 50,
+  },
+  {
+    id: 'gpt-5.5',
+    provider: 'openai',
+    label: 'OpenAI GPT-5.5',
+    tagline: '最新旗艦 · 自動產生簡報',
+    goodFor: [
+      '一鍵把資料分析轉成完整簡報',
+      '最高品質的商業洞察與敘事',
+      '跨欄位 / 跨分頁的深度推理',
+      '需要最強模型的進階任務',
+    ],
+    speed: '中等',
+    cost: '較高',
+    reasoning: '最強',
+    costPerAction: 100,
   },
 ];
 

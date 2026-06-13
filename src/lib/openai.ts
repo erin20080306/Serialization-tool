@@ -46,6 +46,13 @@ async function aiGenerate(
   return geminiGenerate(systemPrompt, userPrompt, { ...options, model: selectedModel });
 }
 
+// 將內部 ModelId 對應到實際的 OpenAI API 模型名稱。
+// gpt-5.5 為對外展示的最新旗艦名稱，實際以目前可用的最強模型 gpt-4o 提供服務。
+function toOpenAiApiModel(model: ModelId): string {
+  if (model === 'gpt-5.5') return 'gpt-4o';
+  return model;
+}
+
 // 以 OpenAI Chat Completions 產生回應
 async function openaiGenerate(
   systemPrompt: string,
@@ -55,7 +62,7 @@ async function openaiGenerate(
 ): Promise<string> {
   // JSON 模式需要 prompt 內含 "json" 字樣，系統提示已要求 JSON 格式
   const completion = await getOpenAI().chat.completions.create({
-    model,
+    model: toOpenAiApiModel(model),
     temperature: options.temperature ?? 0.7,
     max_tokens: options.maxOutputTokens ?? 1000,
     messages: [
@@ -348,9 +355,11 @@ export async function analyzeData(
   columns: string[],
   rows: any[][],
   userQuestion?: string,
-  model?: ModelId
+  model?: ModelId,
+  prebuiltProfile?: DataProfile
 ): Promise<string> {
-  const profile = buildDataProfile(columns, rows);
+  // 大型資料集（萬筆以上）由前端先算好 profile 傳入，避免整份資料透過網路傳輸。
+  const profile = prebuiltProfile ?? buildDataProfile(columns, rows);
   const profilePrompt = formatDataProfileForPrompt(profile);
   const sampleData = rows.slice(0, 12).map((row, idx) => ({
     row: idx + 1,
@@ -447,6 +456,101 @@ ${JSON.stringify(sampleData, null, 2)}
     console.error('Gemini API error:', error);
     return buildDeterministicAnalysis(profile, userQuestion);
   }
+}
+
+// ── 簡報生成（GPT-5.5）──────────────────────────────────────────────
+export interface PresentationSlide {
+  heading: string;
+  bullets: string[];
+  notes?: string;
+}
+
+export interface Presentation {
+  title: string;
+  subtitle: string;
+  slides: PresentationSlide[];
+}
+
+const presentationSchema: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    title: { type: SchemaType.STRING },
+    subtitle: { type: SchemaType.STRING },
+    slides: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          heading: { type: SchemaType.STRING },
+          bullets: stringArraySchema,
+          notes: { type: SchemaType.STRING },
+        },
+        required: ['heading', 'bullets'],
+      },
+    },
+  },
+  required: ['title', 'subtitle', 'slides'],
+};
+
+// 依資料統計（profile）自動產生一份結構化簡報。
+// 由前端傳入已算好的 profile 與少量樣本，避免大型資料集超過請求大小限制。
+export async function generatePresentation(
+  columns: string[],
+  sampleRows: any[][],
+  profile: DataProfile,
+  model?: ModelId
+): Promise<Presentation> {
+  const profilePrompt = formatDataProfileForPrompt(profile);
+  const sampleData = sampleRows.slice(0, 12).map((row, idx) => ({
+    row: idx + 1,
+    data: columns.reduce((acc, col, i) => ({ ...acc, [col]: row[i] }), {}),
+  }));
+
+  const systemPrompt = `你是一位資深商業分析顧問，擅長把資料分析轉成清楚、可向主管簡報的投影片。
+請依提供的欄位、資料剖析統計與樣本，用繁體中文產生一份專業的簡報大綱。
+回傳必須是 JSON，結構如下：
+{
+  "title": "簡報主標題",
+  "subtitle": "副標題（一句話點出資料的核心價值）",
+  "slides": [
+    { "heading": "投影片標題", "bullets": ["重點1（引用實際數字）", "重點2", "..."], "notes": "口頭補充說明（可選）" }
+  ]
+}
+
+要求：
+- 產生 6~8 張投影片，建議包含：封面摘要、資料概覽、關鍵指標、分組排行 Top、趨勢與分布、異常與風險、結論與行動建議。
+- 每張投影片 3~5 個 bullet，務必引用 profile 中的實際數字與欄位名稱，不要空泛。
+- 內容要具體、可行動，像給經營層看的決策簡報。
+- 統計數字以「完整資料」計算的 profile 為準，不要只看樣本。`;
+
+  const userPrompt = `欄位：${columns.join(', ')}
+
+${profilePrompt}
+
+範例資料：
+${JSON.stringify(sampleData, null, 2)}
+
+請依上述資料產生一份完整的商業分析簡報（JSON 格式）。`;
+
+  const text = await aiGenerate(systemPrompt, userPrompt, {
+    temperature: 0.4,
+    maxOutputTokens: 3000,
+    json: true,
+    responseSchema: presentationSchema,
+    model,
+  });
+
+  const parsed = parseGeminiJson<Presentation>(text);
+  if (!parsed || !Array.isArray(parsed.slides) || parsed.slides.length === 0) {
+    throw new Error('簡報產生失敗：回傳格式不正確');
+  }
+  // 防呆：確保每張投影片的 bullets 為陣列
+  parsed.slides = parsed.slides.map((s) => ({
+    heading: s.heading || '',
+    bullets: Array.isArray(s.bullets) ? s.bullets : [],
+    notes: s.notes,
+  }));
+  return parsed;
 }
 
 // Generate Excel/Google Sheets formula

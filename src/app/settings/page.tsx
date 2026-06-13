@@ -36,6 +36,7 @@ const MODEL_ICON: Record<ModelId, typeof Zap> = {
   'gemini-flash-latest': Sparkles,
   'gpt-4o-mini': Zap,
   'gpt-4o': Brain,
+  'gpt-5.5': Sparkles,
 };
 
 export default function SettingsPage() {

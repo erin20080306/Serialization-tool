@@ -5,9 +5,11 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge, Presentation as PresentationIcon, Download, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getSelectedModel } from '@/lib/client-model';
+import { buildDataProfile } from '@/lib/data-profile';
+import { analyzeColumns, detectTableType, findAnomalies } from '@/lib/table-stats';
 
 type ChartType = 'bar' | 'pie' | 'line';
 
@@ -63,6 +65,18 @@ interface AnalysisResult {
     }>;
   };
   insights?: string;
+}
+
+interface PresentationSlide {
+  heading: string;
+  bullets: string[];
+  notes?: string;
+}
+
+interface Presentation {
+  title: string;
+  subtitle: string;
+  slides: PresentationSlide[];
 }
 
 // 偵測使用者是否在要求畫圖表
@@ -248,6 +262,9 @@ export default function AnalyzePage() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [sheets, setSheets] = useState<SheetData[]>([]);
   const [activeSheet, setActiveSheet] = useState(0);
+  const [presentation, setPresentation] = useState<Presentation | null>(null);
+  const [presentationLoading, setPresentationLoading] = useState(false);
+  const [presentationError, setPresentationError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -299,18 +316,102 @@ export default function AnalyzePage() {
     if (!data || index === activeSheet) return;
     setActiveSheet(index);
     setAnalysis(null);
+    setPresentation(null);
+    setPresentationError(null);
     activateSheet(data, sheets, index);
+  };
+
+  // 使用 GPT-5.5 產生簡報（固定扣點 100）
+  const handleGeneratePresentation = async () => {
+    if (!data || presentationLoading) return;
+    setPresentationLoading(true);
+    setPresentationError(null);
+    try {
+      const profile = analysis?.profile ?? buildDataProfile(data.columns, data.rows);
+      const sampleRows = data.rows.slice(0, 12);
+      const response = await fetch('/api/presentation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ columns: data.columns, profile, sampleRows }),
+      });
+      if (response.ok) {
+        const result = await response.json();
+        setPresentation(result.presentation as Presentation);
+      } else if (response.status === 402) {
+        const result = await response.json().catch(() => ({}));
+        setPresentationError(result.message || '點數不足（需 100 點），請至「設定」頁升級方案。');
+      } else {
+        const result = await response.json().catch(() => ({}));
+        setPresentationError(result.error || '簡報產生失敗，請稍後再試。');
+      }
+    } catch (error) {
+      console.error('Presentation error:', error);
+      setPresentationError('發生錯誤，請稍後再試。');
+    } finally {
+      setPresentationLoading(false);
+    }
+  };
+
+  // 將簡報下載為可獨立開啟的 HTML 檔（一頁一張投影片）
+  const handleDownloadPresentation = () => {
+    if (!presentation) return;
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const slidesHtml = presentation.slides
+      .map(
+        (s) => `<section class="slide">
+      <h2>${esc(s.heading)}</h2>
+      <ul>${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
+      ${s.notes ? `<p class="notes">備註：${esc(s.notes)}</p>` : ''}
+    </section>`
+      )
+      .join('\n');
+    const html = `<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><title>${esc(presentation.title)}</title>
+<style>
+  body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;margin:0;background:#f1f5f9;color:#0f172a}
+  .cover{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:80px 60px}
+  .cover h1{font-size:40px;margin:0 0 12px}
+  .cover p{font-size:20px;opacity:.9;margin:0}
+  .slide{background:#fff;margin:24px auto;max-width:900px;padding:40px 48px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.06)}
+  .slide h2{font-size:26px;color:#4338ca;margin:0 0 18px;border-bottom:2px solid #e0e7ff;padding-bottom:10px}
+  .slide ul{font-size:18px;line-height:1.8;padding-left:22px}
+  .notes{margin-top:18px;color:#64748b;font-size:14px;font-style:italic}
+</style></head>
+<body>
+  <div class="cover"><h1>${esc(presentation.title)}</h1><p>${esc(presentation.subtitle)}</p></div>
+  ${slidesHtml}
+</body></html>`;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${presentation.title || '資料分析簡報'}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const loadAnalysis = async (targetData: Data) => {
     setAnalysisLoading(true);
     try {
+      // 在前端先算好統計（profile、欄位分析、異常），只把精簡結果送到後端做 AI 洞察。
+      // 這樣即使資料超過萬筆也不會因為請求過大（Vercel 限制 4.5MB）而失敗。
+      const columnAnalysis = analyzeColumns(targetData.columns, targetData.rows);
+      const tableType = detectTableType(targetData.columns, targetData.rows);
+      const anomalies = findAnomalies(targetData.columns, targetData.rows);
+      const profile = buildDataProfile(targetData.columns, targetData.rows);
+      const sampleRows = targetData.rows.slice(0, 12);
+
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           columns: targetData.columns,
-          rows: targetData.rows,
+          profile,
+          columnAnalysis,
+          tableType,
+          anomalies,
+          sampleRows,
           model: getSelectedModel(),
         }),
       });
@@ -318,6 +419,9 @@ export default function AnalyzePage() {
       if (response.ok) {
         const result = await response.json();
         setAnalysis(result);
+      } else {
+        // 後端 AI 失敗時，仍以前端算好的統計呈現（不阻擋頁面）。
+        setAnalysis({ columnAnalysis, tableType, anomalies, profile });
       }
     } catch (error) {
       console.error('Load analysis error:', error);
@@ -369,13 +473,17 @@ export default function AnalyzePage() {
     setIsTyping(true);
 
     try {
+      // 只送精簡的 profile + 樣本，避免萬筆資料超過請求大小限制。
+      const profile = analysis?.profile ?? buildDataProfile(data.columns, data.rows);
+      const sampleRows = data.rows.slice(0, 12);
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: userMsg,
           columns: data.columns,
-          rows: data.rows,
+          profile,
+          sampleRows,
           model: getSelectedModel(),
         }),
       });
@@ -496,6 +604,87 @@ export default function AnalyzePage() {
             載入資料後即可看到重點摘要。建議資料含分類（如產品、客戶）與數值（如金額、數量）欄位，摘要會更精準。
           </div>
         )}
+      </Card>
+      {/* AI 簡報生成（GPT-5.5，扣點 100） */}
+      <Card className="border-rose-100 overflow-hidden">
+        <div className="p-4 bg-gradient-to-r from-rose-600 to-pink-600 text-white flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <PresentationIcon className="w-5 h-5 shrink-0" />
+            <div className="min-w-0">
+              <h3 className="font-semibold flex items-center gap-1.5">
+                AI 簡報生成
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-white/20 rounded-full px-2 py-0.5">
+                  <Sparkles className="w-3 h-3" /> GPT-5.5
+                </span>
+              </h3>
+              <p className="text-xs text-rose-100">一鍵把這份分析做成可向主管報告的簡報</p>
+            </div>
+          </div>
+          <span className="text-xs font-medium bg-white/20 rounded-full px-2.5 py-1 whitespace-nowrap">扣 100 點</span>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={handleGeneratePresentation}
+              disabled={presentationLoading || analysisLoading}
+              className="gap-2 bg-rose-600 hover:bg-rose-700"
+            >
+              {presentationLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> 產生簡報中...
+                </>
+              ) : (
+                <>
+                  <PresentationIcon className="w-4 h-4" /> {presentation ? '重新產生簡報' : '產生簡報'}
+                </>
+              )}
+            </Button>
+            {presentation && (
+              <Button onClick={handleDownloadPresentation} variant="outline" className="gap-2">
+                <Download className="w-4 h-4" /> 下載簡報（HTML）
+              </Button>
+            )}
+          </div>
+          {presentationError && (
+            <p className="text-sm text-rose-600 bg-rose-50 rounded-lg p-3">{presentationError}</p>
+          )}
+          {presentationLoading && (
+            <p className="text-xs text-slate-500">GPT-5.5 正在依資料統計撰寫投影片，約需 10~30 秒...</p>
+          )}
+          {presentation && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100 p-4">
+                <div className="text-base font-bold text-rose-700">{presentation.title}</div>
+                <div className="text-sm text-slate-600 mt-1">{presentation.subtitle}</div>
+                <div className="text-xs text-slate-400 mt-2">共 {presentation.slides.length} 張投影片</div>
+              </div>
+              <div className="space-y-3">
+                {presentation.slides.map((slide, idx) => (
+                  <div key={idx} className="rounded-lg border border-slate-200 overflow-hidden">
+                    <div className="flex items-center gap-2 bg-slate-50 px-4 py-2 border-b border-slate-200">
+                      <span className="w-6 h-6 rounded-md bg-rose-600 text-white text-xs flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-800">{slide.heading}</span>
+                    </div>
+                    <div className="p-4">
+                      <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-700">
+                        {slide.bullets.map((b, i) => (
+                          <li key={i}>{b}</li>
+                        ))}
+                      </ul>
+                      {slide.notes && (
+                        <p className="text-xs text-slate-400 mt-3 italic border-t border-slate-100 pt-2">
+                          備註：{slide.notes}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </Card>
       {sheets.length > 1 && (
         <Card className="border-slate-200 p-3">

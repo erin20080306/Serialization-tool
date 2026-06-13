@@ -12,6 +12,7 @@ const MODEL_ACCENT: Record<string, { icon: typeof Zap; color: string; bg: string
   'gemini-flash-latest': { icon: Sparkles, color: 'text-amber-600', bg: 'bg-amber-100' },
   'gpt-4o-mini': { icon: Zap, color: 'text-emerald-600', bg: 'bg-emerald-100' },
   'gpt-4o': { icon: Brain, color: 'text-teal-600', bg: 'bg-teal-100' },
+  'gpt-5.5': { icon: Sparkles, color: 'text-rose-600', bg: 'bg-rose-100' },
 };
 
 export default function DashboardHome() {
