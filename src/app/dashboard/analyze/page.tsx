@@ -5,11 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge, Presentation as PresentationIcon, Download, Sparkles } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge, Presentation as PresentationIcon, Download, Sparkles, FileText, FileDown, Table2, BookmarkPlus, Trash2, FolderDown } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getSelectedModel } from '@/lib/client-model';
 import { buildDataProfile } from '@/lib/data-profile';
 import { analyzeColumns, detectTableType, findAnomalies } from '@/lib/table-stats';
+import { buildReportHtml, buildReportMarkdown, computePivot, AGG_LABELS, type AggMethod, type ReportPayload } from '@/lib/exporters';
 
 type ChartType = 'bar' | 'pie' | 'line';
 
@@ -77,6 +78,14 @@ interface Presentation {
   title: string;
   subtitle: string;
   slides: PresentationSlide[];
+}
+
+// 收藏到「我的報告」的項目：AI 文字回答或圖表
+interface SavedItem {
+  id: string;
+  kind: 'text' | 'chart';
+  text?: string;
+  chart?: ChartSpec;
 }
 
 // 偵測使用者是否在要求畫圖表
@@ -265,6 +274,13 @@ export default function AnalyzePage() {
   const [presentation, setPresentation] = useState<Presentation | null>(null);
   const [presentationLoading, setPresentationLoading] = useState(false);
   const [presentationError, setPresentationError] = useState<string | null>(null);
+  // 自訂樞紐分析
+  const [pivotGroup, setPivotGroup] = useState<number>(-1);
+  const [pivotMetric, setPivotMetric] = useState<number>(-1);
+  const [pivotAgg, setPivotAgg] = useState<AggMethod>('sum');
+  const [pivotChart, setPivotChart] = useState<ChartSpec | null>(null);
+  // 我的報告（收藏）
+  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -318,7 +334,118 @@ export default function AnalyzePage() {
     setAnalysis(null);
     setPresentation(null);
     setPresentationError(null);
+    setPivotChart(null);
+    setPivotGroup(-1);
+    setPivotMetric(-1);
     activateSheet(data, sheets, index);
+  };
+
+  // 收集分析報告所需的結構化資料（供 HTML / Markdown 匯出）
+  const buildReportPayload = (): ReportPayload | null => {
+    if (!data) return null;
+    const highlights = buildHighlights(analysis, data);
+    return {
+      title: `${data.fileName || '資料'} 分析報告`,
+      sheetName: data.sheetName,
+      rowCount: data.rows.length,
+      columnCount: data.columns.length,
+      tableType: analysis?.tableType || data.tableType,
+      headline: highlights?.headline,
+      highlights: highlights?.items.map((it) => ({ label: it.label, value: it.value, detail: it.detail })),
+      insights: analysis?.insights,
+      anomalies: analysis?.anomalies,
+      numericColumns: analysis?.profile?.columns
+        .filter((c) => c.numeric)
+        .map((c) => ({ name: c.name, numeric: c.numeric })),
+      categoryMetrics: analysis?.profile?.categoryMetrics,
+    };
+  };
+
+  const handleDownloadReport = (format: 'html' | 'md') => {
+    const payload = buildReportPayload();
+    if (!payload) return;
+    if (format === 'html') {
+      const html = buildReportHtml(payload);
+      triggerDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), `${payload.title}.html`);
+    } else {
+      const md = buildReportMarkdown(payload);
+      triggerDownload(new Blob([md], { type: 'text/markdown;charset=utf-8' }), `${payload.title}.md`);
+    }
+  };
+
+  // 將簡報匯出成真正的 PowerPoint (.pptx)
+  const handleDownloadPptx = async () => {
+    if (!presentation) return;
+    const PptxGenJS = (await import('pptxgenjs')).default;
+    const pptx = new PptxGenJS();
+    pptx.layout = 'LAYOUT_WIDE';
+
+    // 封面
+    const cover = pptx.addSlide();
+    cover.background = { color: '4F46E5' };
+    cover.addText(presentation.title, { x: 0.6, y: 2.0, w: 12, h: 1.2, fontSize: 40, bold: true, color: 'FFFFFF' });
+    cover.addText(presentation.subtitle, { x: 0.6, y: 3.3, w: 12, h: 0.8, fontSize: 20, color: 'E0E7FF' });
+
+    // 內容頁
+    for (const s of presentation.slides) {
+      const slide = pptx.addSlide();
+      slide.addText(s.heading, { x: 0.5, y: 0.4, w: 12.3, h: 0.8, fontSize: 26, bold: true, color: '4338CA' });
+      slide.addText(
+        s.bullets.map((b) => ({ text: b, options: { bullet: true, fontSize: 16, color: '1E293B', breakLine: true } })),
+        { x: 0.7, y: 1.5, w: 11.8, h: 5 }
+      );
+      if (s.notes) slide.addNotes(s.notes);
+    }
+    await pptx.writeFile({ fileName: `${presentation.title || '資料分析簡報'}.pptx` });
+  };
+
+  // 執行樞紐分析並產生圖表
+  const handleRunPivot = () => {
+    if (!data || pivotGroup < 0) return;
+    const needMetric = pivotAgg !== 'count';
+    if (needMetric && pivotMetric < 0) return;
+    const result = computePivot(data.rows, pivotGroup, pivotMetric, pivotAgg);
+    if (!result.length) {
+      setPivotChart(null);
+      return;
+    }
+    const metricLabel = pivotAgg === 'count' ? '筆數' : data.columns[pivotMetric];
+    setPivotChart({
+      type: 'bar',
+      title: `依「${data.columns[pivotGroup]}」${AGG_LABELS[pivotAgg]}「${metricLabel}」`,
+      data: result.map((r) => ({ label: r.label, value: Math.round(r.value * 100) / 100 })),
+    });
+  };
+
+  // 收藏到「我的報告」
+  const addSavedItem = (item: Omit<SavedItem, 'id'>) => {
+    setSavedItems((prev) => [...prev, { ...item, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` }]);
+  };
+  const removeSavedItem = (id: string) => setSavedItems((prev) => prev.filter((s) => s.id !== id));
+
+  // 匯出整批收藏為獨立 HTML
+  const handleExportSaved = () => {
+    if (!savedItems.length) return;
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const blocks = savedItems
+      .map((it) => {
+        if (it.kind === 'chart' && it.chart) {
+          return `<section class="block"><h3>${esc(it.chart.title)}</h3>${buildChartSvg(it.chart)}</section>`;
+        }
+        const textHtml = (it.text || '')
+          .split('\n')
+          .map((l) => (l.match(/^\*\*(.+?)\*\*$/) ? `<h4>${esc(l.replace(/\*\*/g, ''))}</h4>` : `<p>${esc(l)}</p>`))
+          .join('');
+        return `<section class="block">${textHtml}</section>`;
+      })
+      .join('\n');
+    const html = `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="utf-8"><title>我的報告</title>
+<style>body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;background:#f8fafc;color:#0f172a;margin:0}
+.page{max-width:900px;margin:0 auto;padding:40px 32px}h1{color:#312e81}
+.block{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px 24px;margin-bottom:18px}
+.block h3{color:#4338ca;margin-top:0}.block p{line-height:1.7;margin:6px 0}svg{max-width:100%}</style></head>
+<body><div class="page"><h1>我的報告</h1><p style="color:#64748b">${data?.fileName ? esc(data.fileName) + ' ・ ' : ''}共 ${savedItems.length} 項 ・ ${new Date().toLocaleString()}</p>${blocks}</div></body></html>`;
+    triggerDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), '我的報告.html');
   };
 
   // 使用 GPT-5.5 產生簡報（固定扣點 100）
@@ -558,12 +685,32 @@ export default function AnalyzePage() {
       <div className="flex flex-col gap-6 min-w-0">
       {/* 重點摘要：AI Data Analyst 風格的可行動總結 */}
       <Card className="border-indigo-100 overflow-hidden">
-        <div className="p-4 bg-gradient-to-r from-indigo-600 to-violet-600 text-white flex items-center gap-2">
-          <Lightbulb className="w-5 h-5" />
-          <div>
-            <h3 className="font-semibold">重點摘要</h3>
-            <p className="text-xs text-indigo-100">把資料轉成可行動的重點，免 SQL、免公式</p>
+        <div className="p-4 bg-gradient-to-r from-indigo-600 to-violet-600 text-white flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Lightbulb className="w-5 h-5 shrink-0" />
+            <div className="min-w-0">
+              <h3 className="font-semibold">重點摘要</h3>
+              <p className="text-xs text-indigo-100">把資料轉成可行動的重點，免 SQL、免公式</p>
+            </div>
           </div>
+          {highlights && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => handleDownloadReport('html')}
+                title="下載報告（HTML，可用瀏覽器列印成 PDF）"
+                className="flex items-center gap-1 text-xs bg-white/20 hover:bg-white/30 rounded-md px-2 py-1 transition-colors"
+              >
+                <FileText className="w-3.5 h-3.5" /> HTML
+              </button>
+              <button
+                onClick={() => handleDownloadReport('md')}
+                title="下載報告（Markdown）"
+                className="flex items-center gap-1 text-xs bg-white/20 hover:bg-white/30 rounded-md px-2 py-1 transition-colors"
+              >
+                <FileDown className="w-3.5 h-3.5" /> MD
+              </button>
+            </div>
+          )}
         </div>
         {analysisLoading && !highlights ? (
           <div className="p-6 flex items-center gap-2 text-slate-500 text-sm">
@@ -640,9 +787,14 @@ export default function AnalyzePage() {
               )}
             </Button>
             {presentation && (
-              <Button onClick={handleDownloadPresentation} variant="outline" className="gap-2">
-                <Download className="w-4 h-4" /> 下載簡報（HTML）
-              </Button>
+              <>
+                <Button onClick={handleDownloadPptx} variant="outline" className="gap-2">
+                  <Download className="w-4 h-4" /> 下載 PPTX
+                </Button>
+                <Button onClick={handleDownloadPresentation} variant="outline" className="gap-2">
+                  <Download className="w-4 h-4" /> 下載 HTML
+                </Button>
+              </>
             )}
           </div>
           {presentationError && (
@@ -686,6 +838,115 @@ export default function AnalyzePage() {
           )}
         </div>
       </Card>
+      {/* 自訂樞紐分析 */}
+      <Card className="border-emerald-100 overflow-hidden">
+        <div className="p-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex items-center gap-2">
+          <Table2 className="w-5 h-5 shrink-0" />
+          <div>
+            <h3 className="font-semibold">自訂樞紐分析</h3>
+            <p className="text-xs text-emerald-100">自選分組欄位、數值欄位與聚合方式，即時彙總（免扣點）</p>
+          </div>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="sm:col-span-1">
+              <label className="text-xs text-slate-500 mb-1 block">分組欄位</label>
+              <select
+                value={pivotGroup}
+                onChange={(e) => setPivotGroup(Number(e.target.value))}
+                className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm bg-white"
+              >
+                <option value={-1}>請選擇…</option>
+                {data.columns.map((c, i) => (
+                  <option key={i} value={i}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-1">
+              <label className="text-xs text-slate-500 mb-1 block">聚合方式</label>
+              <select
+                value={pivotAgg}
+                onChange={(e) => setPivotAgg(e.target.value as AggMethod)}
+                className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm bg-white"
+              >
+                {(Object.keys(AGG_LABELS) as AggMethod[]).map((k) => (
+                  <option key={k} value={k}>{AGG_LABELS[k]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-1">
+              <label className="text-xs text-slate-500 mb-1 block">
+                數值欄位{pivotAgg === 'count' ? '（計數免選）' : ''}
+              </label>
+              <select
+                value={pivotMetric}
+                onChange={(e) => setPivotMetric(Number(e.target.value))}
+                disabled={pivotAgg === 'count'}
+                className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm bg-white disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                <option value={-1}>請選擇…</option>
+                {data.columns.map((c, i) => (
+                  <option key={i} value={i}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-1 flex items-end">
+              <Button
+                onClick={handleRunPivot}
+                disabled={pivotGroup < 0 || (pivotAgg !== 'count' && pivotMetric < 0)}
+                className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700"
+              >
+                <Table2 className="w-4 h-4" /> 產生
+              </Button>
+            </div>
+          </div>
+          {pivotChart && (
+            <div className="rounded-lg border border-slate-200 p-3">
+              <ChatChart spec={pivotChart} />
+            </div>
+          )}
+        </div>
+      </Card>
+      {/* 我的報告（收藏） */}
+      {savedItems.length > 0 && (
+        <Card className="border-amber-100 overflow-hidden">
+          <div className="p-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <BookmarkPlus className="w-5 h-5 shrink-0" />
+              <div className="min-w-0">
+                <h3 className="font-semibold">我的報告</h3>
+                <p className="text-xs text-amber-100">已收藏 {savedItems.length} 項，可整批匯出</p>
+              </div>
+            </div>
+            <Button onClick={handleExportSaved} variant="secondary" size="sm" className="gap-1.5 shrink-0">
+              <FolderDown className="w-4 h-4" /> 匯出全部
+            </Button>
+          </div>
+          <div className="p-4 space-y-2">
+            {savedItems.map((item) => (
+              <div key={item.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3">
+                <div className="min-w-0 flex-1">
+                  {item.kind === 'chart' && item.chart ? (
+                    <div className="text-sm text-slate-700 flex items-center gap-1.5">
+                      <BarChart3 className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="truncate">{item.chart.title}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-600 line-clamp-3 whitespace-pre-wrap">{item.text}</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => removeSavedItem(item.id)}
+                  title="移除"
+                  className="text-slate-400 hover:text-rose-500 shrink-0"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       {sheets.length > 1 && (
         <Card className="border-slate-200 p-3">
           <div className="flex items-center gap-2 mb-2">
@@ -987,6 +1248,23 @@ export default function AnalyzePage() {
                     <ChatChart spec={msg.chart} />
                   </div>
                 )}
+                {msg.role === 'assistant' && (msg.text.trim() || msg.chart) && (
+                  <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
+                    <button
+                      onClick={() =>
+                        addSavedItem(
+                          msg.chart
+                            ? { kind: 'chart', chart: msg.chart, text: msg.text }
+                            : { kind: 'text', text: msg.text }
+                        )
+                      }
+                      title="加入我的報告"
+                      className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-amber-600 transition-colors"
+                    >
+                      <BookmarkPlus className="w-3.5 h-3.5" /> 加入我的報告
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -1054,6 +1332,145 @@ const PIE_COLORS = [
   '#8b5cf6', '#ef4444', '#14b8a6', '#eab308', '#3b82f6',
 ];
 
+function escapeXml(s: string) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function truncateLabel(s: string, max = 14) {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+// 把圖表規格輸出成獨立可下載的 SVG 字串（含標題、圖例、座標）。
+function buildChartSvg(spec: ChartSpec): string {
+  const W = 680;
+  const H = 420;
+  const top = 56;
+  const header = `<text x="20" y="30" font-family="sans-serif" font-size="16" font-weight="700" fill="#0f172a">${escapeXml(spec.title)}</text>`;
+  let body = '';
+
+  if (spec.type === 'pie') {
+    const data = spec.data.filter((d) => d.value > 0);
+    const total = data.reduce((s, d) => s + d.value, 0) || 1;
+    const cx = 150;
+    const cy = 235;
+    const r = 115;
+    let cum = 0;
+    const polar = (a: number) => {
+      const rad = ((a - 90) * Math.PI) / 180;
+      return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+    };
+    const paths = data
+      .map((d, i) => {
+        const start = (cum / total) * 360;
+        cum += d.value;
+        const end = (cum / total) * 360;
+        const s = polar(start);
+        const e = polar(end);
+        const large = end - start > 180 ? 1 : 0;
+        const dd =
+          data.length === 1
+            ? `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0`
+            : `M ${cx} ${cy} L ${s.x.toFixed(1)} ${s.y.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(1)} ${e.y.toFixed(1)} Z`;
+        return `<path d="${dd}" fill="${PIE_COLORS[i % PIE_COLORS.length]}" stroke="#fff" stroke-width="1.5"/>`;
+      })
+      .join('');
+    const legend = data
+      .map((d, i) => {
+        const y = 90 + i * 26;
+        const pct = ((d.value / total) * 100).toFixed(1);
+        return (
+          `<rect x="330" y="${y - 11}" width="13" height="13" rx="2" fill="${PIE_COLORS[i % PIE_COLORS.length]}"/>` +
+          `<text x="352" y="${y}" font-family="sans-serif" font-size="13" fill="#334155">${escapeXml(truncateLabel(d.label, 18))}</text>` +
+          `<text x="660" y="${y}" text-anchor="end" font-family="sans-serif" font-size="13" fill="#0f172a">${d.value.toLocaleString()} (${pct}%)</text>`
+        );
+      })
+      .join('');
+    body = paths + legend;
+  } else if (spec.type === 'line') {
+    const pad = 56;
+    const plotW = W - pad * 2;
+    const plotH = H - top - 50;
+    const values = spec.data.map((p) => p.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const n = Math.max(spec.data.length - 1, 1);
+    const coords = spec.data.map((p, i) => {
+      const x = pad + (i * plotW) / n;
+      const y = top + plotH - ((p.value - min) / range) * plotH;
+      return { x, y };
+    });
+    const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+    const dots = coords.map((c) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3" fill="#6366f1"/>`).join('');
+    const axis = `<line x1="${pad}" y1="${top + plotH}" x2="${W - pad}" y2="${top + plotH}" stroke="#cbd5e1" stroke-width="1"/>`;
+    const labels =
+      `<text x="${pad}" y="${top + plotH + 22}" font-family="sans-serif" font-size="11" fill="#94a3b8">${escapeXml(truncateLabel(spec.data[0].label))}</text>` +
+      `<text x="${W - pad}" y="${top + plotH + 22}" text-anchor="end" font-family="sans-serif" font-size="11" fill="#94a3b8">${escapeXml(truncateLabel(spec.data[spec.data.length - 1].label))}</text>`;
+    body = axis + `<path d="${path}" fill="none" stroke="#6366f1" stroke-width="2.5"/>` + dots + labels;
+  } else {
+    const max = Math.max(...spec.data.map((b) => Math.abs(b.value)), 1);
+    const plotX = 170;
+    const plotW = W - plotX - 90;
+    const rowH = Math.min(34, (H - top - 16) / spec.data.length);
+    body = spec.data
+      .map((b, i) => {
+        const y = top + i * rowH;
+        const bw = Math.max((Math.abs(b.value) / max) * plotW, 2);
+        return (
+          `<text x="20" y="${(y + rowH / 2 + 4).toFixed(1)}" font-family="sans-serif" font-size="12" fill="#475569">${escapeXml(truncateLabel(b.label, 18))}</text>` +
+          `<rect x="${plotX}" y="${(y + 4).toFixed(1)}" width="${bw.toFixed(1)}" height="${(rowH - 10).toFixed(1)}" rx="3" fill="#6366f1"/>` +
+          `<text x="${(plotX + bw + 6).toFixed(1)}" y="${(y + rowH / 2 + 4).toFixed(1)}" font-family="sans-serif" font-size="11" fill="#0f172a">${b.value.toLocaleString()}</text>`
+        );
+      })
+      .join('');
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${header}${body}</svg>`;
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadChartPng(spec: ChartSpec) {
+  const svg = buildChartSvg(spec);
+  const svg64 = btoa(unescape(encodeURIComponent(svg)));
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = 680 * scale;
+    canvas.height = 420 * scale;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 680, 420);
+    ctx.drawImage(img, 0, 0);
+    canvas.toBlob((blob) => {
+      if (blob) triggerDownload(blob, `${spec.title || '圖表'}.png`);
+    }, 'image/png');
+  };
+  img.src = `data:image/svg+xml;base64,${svg64}`;
+}
+
+function downloadChartCsv(spec: ChartSpec) {
+  const rows = [['項目', '數值'], ...spec.data.map((d) => [d.label, String(d.value)])];
+  const csv =
+    '\ufeff' +
+    rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${spec.title || '圖表資料'}.csv`);
+}
+
 function PieChart({ slices }: { slices: Array<{ label: string; value: number }> }) {
   const total = slices.reduce((sum, s) => sum + s.value, 0);
   if (total <= 0) return null;
@@ -1111,16 +1528,65 @@ function PieChart({ slices }: { slices: Array<{ label: string; value: number }> 
 }
 
 // 聊天中的圖表：依規格渲染長條 / 圓餅 / 折線
+const CHART_TYPE_OPTIONS: Array<{ type: ChartType; label: string; Icon: typeof BarChart3 }> = [
+  { type: 'bar', label: '長條', Icon: BarChart3 },
+  { type: 'pie', label: '圓餅', Icon: PieChartIcon },
+  { type: 'line', label: '折線', Icon: TrendingUp },
+];
+
 function ChatChart({ spec }: { spec: ChartSpec }) {
+  // 允許在同一份資料上即時切換圖型（長條／圓餅／折線），不需重新提問。
+  const [type, setType] = useState<ChartType>(spec.type);
+  // 圓餅圖只取正值；其餘維持原資料。
+  const data = type === 'pie' ? spec.data.filter((d) => d.value > 0) : spec.data;
+  const current: ChartSpec = { ...spec, type, data };
+
   return (
     <div>
-      <div className="text-xs font-medium text-slate-600 mb-2">{spec.title}</div>
-      {spec.type === 'pie' ? (
-        <PieChart slices={spec.data.map((d) => ({ label: d.label, value: d.value }))} />
-      ) : spec.type === 'line' ? (
-        <LineChart points={spec.data} />
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="text-xs font-medium text-slate-600 min-w-0 truncate" title={spec.title}>
+          {spec.title}
+        </div>
+        <div className="flex items-center gap-1">
+          {/* 圖型切換 */}
+          <div className="flex items-center rounded-md border border-slate-200 overflow-hidden">
+            {CHART_TYPE_OPTIONS.map(({ type: t, label, Icon }) => (
+              <button
+                key={t}
+                onClick={() => setType(t)}
+                title={`切換為${label}圖`}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                  type === t ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                <Icon className="w-3 h-3" />
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+            ))}
+          </div>
+          {/* 下載 */}
+          <button
+            onClick={() => downloadChartPng(current)}
+            title="下載 PNG 圖片"
+            className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
+          >
+            <Download className="w-3 h-3" /> PNG
+          </button>
+          <button
+            onClick={() => downloadChartCsv(current)}
+            title="下載資料 CSV"
+            className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
+          >
+            <Download className="w-3 h-3" /> CSV
+          </button>
+        </div>
+      </div>
+      {type === 'pie' ? (
+        <PieChart slices={data.map((d) => ({ label: d.label, value: d.value }))} />
+      ) : type === 'line' ? (
+        <LineChart points={data} />
       ) : (
-        <BarChart bars={spec.data} />
+        <BarChart bars={data} />
       )}
     </div>
   );
