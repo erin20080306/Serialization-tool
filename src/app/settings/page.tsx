@@ -60,7 +60,7 @@ export default function SettingsPage() {
 
   const flashPlans = credits?.plans.filter((p) => p.model === 'gemini-2.5-flash' && p.price > 0) ?? [];
   const proPlans = credits?.plans.filter((p) => p.model === 'gemini-2.5-pro') ?? [];
-  const selectedCost = MODELS.find((m) => m.id === selected)?.costPerAction ?? 30;
+  const selectedCost = MODELS.find((m) => m.id === selected)?.costPerAction ?? 25;
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 lg:p-8">
@@ -112,7 +112,7 @@ export default function SettingsPage() {
             </div>
           )}
           <p className="text-xs text-slate-400 mt-3">
-            點數依模型計費：Gemini 2.5 Flash 每次 30 點、Gemini 2.5 Pro 每次 50 點、Gemini Flash (Latest) 每次 20 點。
+            點數依模型計費：{MODELS.map((m) => `${m.label} ${m.costPerAction} 點`).join('、')}。
           </p>
         </Card>
 

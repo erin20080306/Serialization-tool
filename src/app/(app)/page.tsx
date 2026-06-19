@@ -75,9 +75,10 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card className="p-6">
               <h3 className="text-lg font-bold mb-2">免費版</h3>
-              <div className="text-3xl font-bold mb-4">$0<span className="text-sm font-normal text-slate-500">/月</span></div>
+              <div className="text-3xl font-bold mb-4">NT$0<span className="text-sm font-normal text-slate-500">/月</span></div>
               <ul className="space-y-2 text-sm text-slate-600 mb-6">
-                <li>• 每月 5 次分析</li>
+                <li>• 登入即贈 200 點</li>
+                <li>• 約 8 次 Flash 分析</li>
                 <li>• 基本公式產生</li>
                 <li>• 社群支援</li>
               </ul>
@@ -86,20 +87,20 @@ export default function LandingPage() {
             <Card className="p-6 border-2 border-indigo-500 relative">
               <Badge className="absolute -top-3 left-1/2 -translate-x-1/2">熱門</Badge>
               <h3 className="text-lg font-bold mb-2">專業版</h3>
-              <div className="text-3xl font-bold mb-4">$29<span className="text-sm font-normal text-slate-500">/月</span></div>
+              <div className="text-3xl font-bold mb-4">NT$300<span className="text-sm font-normal text-slate-500">/月</span></div>
               <ul className="space-y-2 text-sm text-slate-600 mb-6">
-                <li>• 無限次分析</li>
+                <li>• 每月 9,000 點（約 360 次 Flash 分析）</li>
                 <li>• 進階公式與 Apps Script</li>
-                <li>• 自動報表產生</li>
+                <li>• 自動報表與 GPT-5.5 簡報</li>
                 <li>• 優先支援</li>
               </ul>
               <Button className="w-full">開始使用</Button>
             </Card>
             <Card className="p-6">
               <h3 className="text-lg font-bold mb-2">企業版</h3>
-              <div className="text-3xl font-bold mb-4">$99<span className="text-sm font-normal text-slate-500">/月</span></div>
+              <div className="text-3xl font-bold mb-4">NT$2,400<span className="text-sm font-normal text-slate-500">/月起</span></div>
               <ul className="space-y-2 text-sm text-slate-600 mb-6">
-                <li>• 團隊協作</li>
+                <li>• 每月 60,000 點 · 團隊協作</li>
                 <li>• API 存取</li>
                 <li>• 專屬顧問</li>
                 <li>• SLA 保證</li>

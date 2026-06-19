@@ -43,7 +43,7 @@ export const MODELS: ModelConfig[] = [
     speed: '快',
     cost: '中低',
     reasoning: '良好',
-    costPerAction: 30,
+    costPerAction: 25,
   },
   {
     id: 'gemini-2.5-pro',
@@ -59,7 +59,7 @@ export const MODELS: ModelConfig[] = [
     speed: '中等',
     cost: '較高',
     reasoning: '最強',
-    costPerAction: 50,
+    costPerAction: 150,
   },
   {
     id: 'gemini-flash-latest',
@@ -74,7 +74,7 @@ export const MODELS: ModelConfig[] = [
     speed: '極快',
     cost: '最低',
     reasoning: '基本',
-    costPerAction: 20,
+    costPerAction: 15,
   },
   {
     id: 'gpt-4o-mini',
@@ -90,7 +90,7 @@ export const MODELS: ModelConfig[] = [
     speed: '快',
     cost: '中低',
     reasoning: '良好',
-    costPerAction: 30,
+    costPerAction: 25,
   },
   {
     id: 'gpt-4o',
@@ -106,8 +106,9 @@ export const MODELS: ModelConfig[] = [
     speed: '中等',
     cost: '較高',
     reasoning: '最強',
-    costPerAction: 50,
+    costPerAction: 120,
   },
+  // 簡報專用：固定 100 點（最便宜點數包約 NT$0.03/點 → NT$3，毛利約 60%）
   {
     id: 'gpt-5.5',
     provider: 'openai',
