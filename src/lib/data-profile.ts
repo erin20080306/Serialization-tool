@@ -322,8 +322,10 @@ export function formatDataProfileForPrompt(profile: DataProfile) {
   };
 
   const businessSummary = profile.businessColumns
-    .map((column) => `- ${column.name} → ${semanticLabel[column.semantic]}`)
-    .join('\n');
+    ? profile.businessColumns
+        .map((column) => `- ${column.name} → ${semanticLabel[column.semantic]}`)
+        .join('\n')
+    : '';
 
   return `資料概況:
 - rows=${profile.rowCount}
