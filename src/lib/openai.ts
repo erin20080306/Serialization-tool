@@ -459,16 +459,121 @@ ${JSON.stringify(sampleData, null, 2)}
 }
 
 // ── 簡報生成（GPT-5.5）──────────────────────────────────────────────
+export type PresentationChartType = 'bar' | 'pie' | 'line';
+
+export interface PresentationChart {
+  type: PresentationChartType;
+  title: string;
+  data: Array<{ label: string; value: number }>;
+}
+
+export interface PresentationReference {
+  title: string;
+  url: string;
+  snippet?: string;
+}
+
 export interface PresentationSlide {
   heading: string;
   bullets: string[];
   notes?: string;
+  // 依資料統計產生的真實圖表（由後端決定資料，AI 僅提示要哪種）
+  chart?: PresentationChart;
 }
 
 export interface Presentation {
   title: string;
   subtitle: string;
   slides: PresentationSlide[];
+  // 網路搜尋取得的延伸參考/案例
+  references?: PresentationReference[];
+}
+
+// AI 對每張投影片可指定的圖表種類提示（後端據此填入真實資料）
+type ChartHint = 'ranking' | 'pie' | 'numeric' | 'trend' | 'none';
+
+// 依 profile 產生可用的「真實資料」圖表候選，供投影片掛載。
+function buildPresentationCharts(profile: DataProfile): Record<ChartHint, PresentationChart | null> {
+  const categoryMetrics = Array.isArray(profile.categoryMetrics) ? profile.categoryMetrics : [];
+  const columns = Array.isArray(profile.columns) ? profile.columns : [];
+
+  // 分組排行（長條）：取第一個商業分組指標的 Top 列
+  const primary = categoryMetrics[0];
+  const ranking: PresentationChart | null = primary?.topRows?.length
+    ? {
+        type: 'bar',
+        title: `「${primary.categoryColumn}」依「${primary.metricColumn}」排行 Top ${Math.min(primary.topRows.length, 8)}`,
+        data: primary.topRows.slice(0, 8).map((r) => ({ label: String(r.value), value: Number(r.total) || 0 })),
+      }
+    : null;
+
+  // 占比（圓餅）：同樣資料以占比呈現
+  const pie: PresentationChart | null = primary?.topRows?.length
+    ? {
+        type: 'pie',
+        title: `「${primary.categoryColumn}」占比（依「${primary.metricColumn}」）`,
+        data: primary.topRows.slice(0, 6).map((r) => ({ label: String(r.value), value: Number(r.total) || 0 })),
+      }
+    : null;
+
+  // 數值欄位比較（長條）：各數值欄位總計
+  const numericCols = columns.filter((c) => c.numeric);
+  const numeric: PresentationChart | null = numericCols.length
+    ? {
+        type: 'bar',
+        title: '主要數值欄位總計比較',
+        data: numericCols.slice(0, 8).map((c) => ({ label: c.name, value: Number(c.numeric?.sum) || 0 })),
+      }
+    : null;
+
+  // 趨勢（折線）：若有第二個分組指標可呈現另一維度，否則沿用排行資料
+  const trend: PresentationChart | null = ranking
+    ? { ...ranking, type: 'line', title: ranking.title.replace('排行', '趨勢') }
+    : null;
+
+  return { ranking, pie, numeric, trend, none: null };
+}
+
+// 透過 OpenAI Responses API 的 web_search 工具取得真實的延伸參考/案例。
+// 失敗或未設定金鑰時回傳空陣列（簡報仍可正常產生）。
+async function searchPresentationReferences(topic: string): Promise<PresentationReference[]> {
+  if (!process.env.OPENAI_API_KEY) return [];
+  try {
+    const client = getOpenAI();
+    // 使用 Responses API + 內建網路搜尋工具
+    const resp = (await client.responses.create({
+      model: 'gpt-4o',
+      tools: [{ type: 'web_search_preview' } as never],
+      input: `請用繁體中文，搜尋與下列主題高度相關的「產業基準數據、分析方法或實際案例」，挑選 3~5 個最有參考價值的來源並簡述重點：\n${topic}`,
+    } as never)) as unknown as {
+      output?: Array<{
+        type: string;
+        content?: Array<{
+          type: string;
+          text?: string;
+          annotations?: Array<{ type: string; url?: string; title?: string }>;
+        }>;
+      }>;
+    };
+
+    const refs: PresentationReference[] = [];
+    const seen = new Set<string>();
+    for (const item of resp.output ?? []) {
+      if (item.type !== 'message') continue;
+      for (const content of item.content ?? []) {
+        for (const ann of content.annotations ?? []) {
+          if (ann.type === 'url_citation' && ann.url && !seen.has(ann.url)) {
+            seen.add(ann.url);
+            refs.push({ title: ann.title || ann.url, url: ann.url });
+          }
+        }
+      }
+    }
+    return refs.slice(0, 5);
+  } catch (e) {
+    console.error('Presentation web search failed (non-fatal):', e);
+    return [];
+  }
 }
 
 const presentationSchema: ResponseSchema = {
@@ -484,6 +589,11 @@ const presentationSchema: ResponseSchema = {
           heading: { type: SchemaType.STRING },
           bullets: stringArraySchema,
           notes: { type: SchemaType.STRING },
+          chart: {
+            type: SchemaType.STRING,
+            format: 'enum',
+            enum: ['ranking', 'pie', 'numeric', 'trend', 'none'],
+          },
         },
         required: ['heading', 'bullets'],
       },
@@ -491,6 +601,19 @@ const presentationSchema: ResponseSchema = {
   },
   required: ['title', 'subtitle', 'slides'],
 };
+
+// AI 回傳的原始投影片（chart 為提示字串，後端再轉成真實圖表資料）
+interface RawSlide {
+  heading?: string;
+  bullets?: string[];
+  notes?: string;
+  chart?: ChartHint;
+}
+interface RawPresentation {
+  title?: string;
+  subtitle?: string;
+  slides?: RawSlide[];
+}
 
 // 依資料統計（profile）自動產生一份結構化簡報。
 // 由前端傳入已算好的 profile 與少量樣本，避免大型資料集超過請求大小限制。
@@ -513,12 +636,17 @@ export async function generatePresentation(
   "title": "簡報主標題",
   "subtitle": "副標題（一句話點出資料的核心價值）",
   "slides": [
-    { "heading": "投影片標題", "bullets": ["重點1（引用實際數字）", "重點2", "..."], "notes": "口頭補充說明（可選）" }
+    { "heading": "投影片標題", "bullets": ["重點1（引用實際數字）", "重點2", "..."], "notes": "口頭補充說明（可選）", "chart": "ranking" }
   ]
 }
 
+關於 chart 欄位（重要）：
+- 每張投影片可指定一個圖表類型，系統會自動填入「依完整資料計算的真實數字」，你不需要自己編圖表資料。
+- 可選值：ranking（分組排行長條圖）、pie（占比圓餅圖）、numeric（數值欄位總計比較長條圖）、trend（趨勢折線圖）、none（不放圖）。
+- 請依該頁主題挑選最合適的圖：分組排行頁用 ranking、占比頁用 pie、關鍵指標頁用 numeric、趨勢頁用 trend；封面、結論等純文字頁用 none。
+
 要求：
-- 產生 6~8 張投影片，建議包含：封面摘要、資料概覽、關鍵指標、分組排行 Top、趨勢與分布、異常與風險、結論與行動建議。
+- 產生 6~8 張投影片，建議包含：封面摘要、資料概覽、關鍵指標(numeric)、分組排行 Top(ranking)、占比分析(pie)、趨勢與分布(trend)、異常與風險、結論與行動建議。
 - 每張投影片 3~5 個 bullet，務必引用 profile 中的實際數字與欄位名稱，不要空泛。
 - 內容要具體、可行動，像給經營層看的決策簡報。
 - 統計數字以「完整資料」計算的 profile 為準，不要只看樣本。`;
@@ -540,17 +668,44 @@ ${JSON.stringify(sampleData, null, 2)}
     model,
   });
 
-  const parsed = parseGeminiJson<Presentation>(text);
+  const parsed = parseGeminiJson<RawPresentation>(text);
   if (!parsed || !Array.isArray(parsed.slides) || parsed.slides.length === 0) {
     throw new Error('簡報產生失敗：回傳格式不正確');
   }
-  // 防呆：確保每張投影片的 bullets 為陣列
-  parsed.slides = parsed.slides.map((s) => ({
-    heading: s.heading || '',
-    bullets: Array.isArray(s.bullets) ? s.bullets : [],
-    notes: s.notes,
-  }));
-  return parsed;
+
+  // 依 profile 備妥真實圖表候選，依 AI 的 chart 提示掛載到對應投影片。
+  const charts = buildPresentationCharts(profile);
+  const slides: PresentationSlide[] = parsed.slides.map((s) => {
+    const hint = (s.chart ?? 'none') as ChartHint;
+    const chart = charts[hint] ?? undefined;
+    return {
+      heading: s.heading || '',
+      bullets: Array.isArray(s.bullets) ? s.bullets : [],
+      notes: s.notes,
+      ...(chart ? { chart } : {}),
+    };
+  });
+
+  // 若 AI 完全沒指定任何圖表，至少自動補上排行/數值圖到合適投影片，確保有真實圖案。
+  const hasAnyChart = slides.some((s) => s.chart);
+  if (!hasAnyChart) {
+    const fallbackChart = charts.ranking ?? charts.numeric ?? charts.pie;
+    if (fallbackChart) {
+      const target =
+        slides.find((s) => /排行|關鍵|指標|分布|趨勢|概覽/.test(s.heading)) ??
+        slides[Math.min(2, slides.length - 1)];
+      if (target) target.chart = fallbackChart;
+    }
+  }
+
+  // 取得網路參考範例（失敗或無金鑰時回空陣列，不影響簡報）。
+  const title = parsed.title || '資料分析簡報';
+  const subtitle = parsed.subtitle || '';
+  const references = await searchPresentationReferences(
+    `${title}。${subtitle}。資料欄位：${columns.join('、')}`
+  );
+
+  return { title, subtitle, slides, ...(references.length ? { references } : {}) };
 }
 
 // Generate Excel/Google Sheets formula

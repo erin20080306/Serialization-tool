@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge, Presentation as PresentationIcon, Download, Sparkles, FileText, FileDown, Table2, BookmarkPlus, Trash2, FolderDown } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bot, Database, Loader2, Send, TrendingUp, Layers, PieChart as PieChartIcon, Lightbulb, Trophy, Target, Gauge, Presentation as PresentationIcon, Download, Sparkles, FileText, FileDown, Table2, BookmarkPlus, Trash2, FolderDown, Globe } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { getSelectedModel } from '@/lib/client-model';
 import { buildDataProfile } from '@/lib/data-profile';
@@ -68,16 +68,24 @@ interface AnalysisResult {
   insights?: string;
 }
 
+interface PresentationReference {
+  title: string;
+  url: string;
+  snippet?: string;
+}
+
 interface PresentationSlide {
   heading: string;
   bullets: string[];
   notes?: string;
+  chart?: ChartSpec;
 }
 
 interface Presentation {
   title: string;
   subtitle: string;
   slides: PresentationSlide[];
+  references?: PresentationReference[];
 }
 
 // 收藏到「我的報告」的項目：AI 文字回答或圖表
@@ -390,12 +398,72 @@ export default function AnalyzePage() {
     for (const s of presentation.slides) {
       const slide = pptx.addSlide();
       slide.addText(s.heading, { x: 0.5, y: 0.4, w: 12.3, h: 0.8, fontSize: 26, bold: true, color: '4338CA' });
+      slide.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.2, w: 12.3, h: 0, line: { color: 'C7D2FE', width: 2 } });
+
+      const hasChart = !!s.chart && s.chart.data.length > 0;
+      const textW = hasChart ? 6.0 : 11.8;
       slide.addText(
         s.bullets.map((b) => ({ text: b, options: { bullet: true, fontSize: 16, color: '1E293B', breakLine: true } })),
-        { x: 0.7, y: 1.5, w: 11.8, h: 5 }
+        { x: 0.7, y: 1.5, w: textW, h: 5, valign: 'top' }
       );
+
+      if (hasChart && s.chart) {
+        const labels = s.chart.data.map((d) => d.label);
+        const values = s.chart.data.map((d) => d.value);
+        const chartData = [{ name: s.chart.title, labels, values }];
+        const chartType =
+          s.chart.type === 'pie'
+            ? pptx.ChartType.pie
+            : s.chart.type === 'line'
+            ? pptx.ChartType.line
+            : pptx.ChartType.bar;
+        slide.addChart(chartType, chartData, {
+          x: 7.0,
+          y: 1.5,
+          w: 5.8,
+          h: 4.8,
+          showTitle: true,
+          title: s.chart.title,
+          titleFontSize: 12,
+          showLegend: s.chart.type === 'pie',
+          legendPos: 'b',
+          showValue: s.chart.type !== 'line',
+          barDir: 'bar',
+          chartColors: ['6366F1', '8B5CF6', 'EC4899', 'F59E0B', '10B981', '3B82F6', 'EF4444', '14B8A6'],
+        });
+      }
       if (s.notes) slide.addNotes(s.notes);
     }
+
+    // 參考範例頁
+    if (presentation.references && presentation.references.length) {
+      const ref = pptx.addSlide();
+      ref.addText('參考範例與延伸閱讀', { x: 0.5, y: 0.4, w: 12.3, h: 0.8, fontSize: 26, bold: true, color: '4338CA' });
+      ref.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.2, w: 12.3, h: 0, line: { color: 'C7D2FE', width: 2 } });
+      ref.addText(
+        presentation.references.map((r) => ({
+          text: r.snippet ? `${r.title} — ${r.snippet}` : r.title,
+          options: {
+            bullet: true,
+            fontSize: 14,
+            color: '3730A3',
+            breakLine: true,
+            hyperlink: { url: r.url, tooltip: r.url },
+          },
+        })),
+        { x: 0.7, y: 1.5, w: 11.8, h: 5, valign: 'top' }
+      );
+      ref.addText('資料來源為網路搜尋結果，僅供延伸參考。', {
+        x: 0.7,
+        y: 6.6,
+        w: 11.8,
+        h: 0.5,
+        fontSize: 11,
+        italic: true,
+        color: '94A3B8',
+      });
+    }
+
     await pptx.writeFile({ fileName: `${presentation.title || '資料分析簡報'}.pptx` });
   };
 
@@ -485,29 +553,71 @@ export default function AnalyzePage() {
     const esc = (s: string) =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const slidesHtml = presentation.slides
-      .map(
-        (s) => `<section class="slide">
-      <h2>${esc(s.heading)}</h2>
-      <ul>${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
+      .map((s, idx) => {
+        const chartHtml = s.chart
+          ? `<div class="chart">${buildChartSvg(s.chart)}</div>`
+          : '';
+        const bodyClass = s.chart ? 'body two-col' : 'body';
+        return `<section class="slide">
+      <div class="slide-head"><span class="badge">${idx + 1}</span><h2>${esc(s.heading)}</h2></div>
+      <div class="${bodyClass}">
+        <ul>${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
+        ${chartHtml}
+      </div>
       ${s.notes ? `<p class="notes">備註：${esc(s.notes)}</p>` : ''}
-    </section>`
-      )
+      <div class="page-no">${idx + 1} / ${presentation.slides.length}</div>
+    </section>`;
+      })
       .join('\n');
+    const refsHtml =
+      presentation.references && presentation.references.length
+        ? `<section class="slide">
+      <div class="slide-head"><span class="badge">★</span><h2>參考範例與延伸閱讀</h2></div>
+      <ul class="refs">${presentation.references
+        .map(
+          (r) =>
+            `<li><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>${
+              r.snippet ? `<div class="snip">${esc(r.snippet)}</div>` : ''
+            }</li>`
+        )
+        .join('')}</ul>
+      <p class="notes">資料來源為網路搜尋結果，僅供延伸參考。</p>
+    </section>`
+        : '';
     const html = `<!DOCTYPE html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><title>${esc(presentation.title)}</title>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(presentation.title)}</title>
 <style>
-  body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;margin:0;background:#f1f5f9;color:#0f172a}
-  .cover{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:80px 60px}
-  .cover h1{font-size:40px;margin:0 0 12px}
-  .cover p{font-size:20px;opacity:.9;margin:0}
-  .slide{background:#fff;margin:24px auto;max-width:900px;padding:40px 48px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.06)}
-  .slide h2{font-size:26px;color:#4338ca;margin:0 0 18px;border-bottom:2px solid #e0e7ff;padding-bottom:10px}
-  .slide ul{font-size:18px;line-height:1.8;padding-left:22px}
-  .notes{margin-top:18px;color:#64748b;font-size:14px;font-style:italic}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;margin:0;background:#e9edf5;color:#1f2937}
+  .deck{max-width:1040px;margin:0 auto;padding:28px 16px}
+  .cover{position:relative;aspect-ratio:16/9;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border-radius:16px;padding:64px 60px;display:flex;flex-direction:column;justify-content:center;box-shadow:0 10px 40px rgba(79,70,229,.25);margin-bottom:24px}
+  .cover h1{font-size:44px;line-height:1.2;margin:0 0 16px;font-weight:800}
+  .cover p{font-size:22px;opacity:.92;margin:0}
+  .cover .tag{position:absolute;top:28px;left:60px;font-size:13px;letter-spacing:2px;opacity:.85;text-transform:uppercase}
+  .slide{position:relative;aspect-ratio:16/9;background:#fff;margin:0 0 24px;padding:40px 48px 52px;border-radius:16px;box-shadow:0 6px 24px rgba(15,23,42,.08);overflow:hidden}
+  .slide-head{display:flex;align-items:center;gap:12px;border-bottom:3px solid #eef2ff;padding-bottom:14px;margin-bottom:22px}
+  .slide-head h2{font-size:28px;color:#4338ca;margin:0;font-weight:800}
+  .badge{width:34px;height:34px;border-radius:9px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;flex:0 0 auto}
+  .body{font-size:19px;line-height:1.85}
+  .body.two-col{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center}
+  .body ul{margin:0;padding-left:24px}
+  .body li{margin:6px 0}
+  .chart{background:#f8fafc;border:1px solid #eef2ff;border-radius:12px;padding:10px}
+  .chart svg{width:100%;height:auto;display:block}
+  .notes{margin:18px 0 0;color:#64748b;font-size:14px;font-style:italic}
+  .page-no{position:absolute;right:24px;bottom:16px;color:#cbd5e1;font-size:13px;font-weight:600}
+  .refs{font-size:18px;line-height:1.7}
+  .refs a{color:#4338ca;text-decoration:none;font-weight:600}
+  .refs a:hover{text-decoration:underline}
+  .refs .snip{color:#64748b;font-size:14px;font-weight:400;margin:2px 0 10px}
+  @media print{body{background:#fff}.deck{padding:0}.slide,.cover{box-shadow:none;page-break-after:always;margin:0;border-radius:0}}
 </style></head>
 <body>
-  <div class="cover"><h1>${esc(presentation.title)}</h1><p>${esc(presentation.subtitle)}</p></div>
-  ${slidesHtml}
+  <div class="deck">
+    <div class="cover"><div class="tag">資料分析簡報</div><h1>${esc(presentation.title)}</h1><p>${esc(presentation.subtitle)}</p></div>
+    ${slidesHtml}
+    ${refsHtml}
+  </div>
 </body></html>`;
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -820,11 +930,18 @@ export default function AnalyzePage() {
                       <span className="text-sm font-semibold text-slate-800">{slide.heading}</span>
                     </div>
                     <div className="p-4">
-                      <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-700">
-                        {slide.bullets.map((b, i) => (
-                          <li key={i}>{b}</li>
-                        ))}
-                      </ul>
+                      <div className={slide.chart ? 'grid md:grid-cols-2 gap-4 items-start' : ''}>
+                        <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-700">
+                          {slide.bullets.map((b, i) => (
+                            <li key={i}>{b}</li>
+                          ))}
+                        </ul>
+                        {slide.chart && (
+                          <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+                            <ChatChart spec={slide.chart} />
+                          </div>
+                        )}
+                      </div>
                       {slide.notes && (
                         <p className="text-xs text-slate-400 mt-3 italic border-t border-slate-100 pt-2">
                           備註：{slide.notes}
@@ -834,6 +951,29 @@ export default function AnalyzePage() {
                   </div>
                 ))}
               </div>
+              {presentation.references && presentation.references.length > 0 && (
+                <div className="rounded-lg border border-slate-200 overflow-hidden">
+                  <div className="flex items-center gap-2 bg-slate-50 px-4 py-2 border-b border-slate-200">
+                    <Globe className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span className="text-sm font-semibold text-slate-800">參考範例與延伸閱讀（網路搜尋）</span>
+                  </div>
+                  <ul className="p-4 space-y-2">
+                    {presentation.references.map((ref, i) => (
+                      <li key={i} className="text-sm">
+                        <a
+                          href={ref.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 hover:underline break-words"
+                        >
+                          {ref.title}
+                        </a>
+                        {ref.snippet && <p className="text-xs text-slate-500 mt-0.5">{ref.snippet}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>
