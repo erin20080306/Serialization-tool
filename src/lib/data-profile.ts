@@ -278,7 +278,17 @@ export function buildDataProfile(columns: string[], rows: unknown[][]): DataProf
 }
 
 export function formatDataProfileForPrompt(profile: DataProfile) {
-  const numericSummary = profile.columns
+  // 防禦性處理：前端傳入的 prebuilt profile 可能缺少部分陣列欄位，
+  // 一律以空陣列為後備，避免對 undefined 呼叫陣列方法導致崩潰。
+  const columns = Array.isArray(profile.columns) ? profile.columns : [];
+  const categoryMetrics = Array.isArray(profile.categoryMetrics)
+    ? profile.categoryMetrics
+    : [];
+  const businessColumns = Array.isArray(profile.businessColumns)
+    ? profile.businessColumns
+    : [];
+
+  const numericSummary = columns
     .filter((column) => column.numeric)
     .map(
       (column) =>
@@ -286,7 +296,7 @@ export function formatDataProfileForPrompt(profile: DataProfile) {
     )
     .join('\n');
 
-  const categorySummary = profile.columns
+  const categorySummary = columns
     .filter((column) => column.topValues && column.topValues.length > 0)
     .slice(0, 8)
     .map(
@@ -295,16 +305,16 @@ export function formatDataProfileForPrompt(profile: DataProfile) {
     )
     .join('\n');
 
-  const dateSummary = profile.columns
+  const dateSummary = columns
     .filter((column) => column.date)
     .map((column) => `- ${column.name}: ${column.date?.min} to ${column.date?.max}`)
     .join('\n');
 
-  const rankingSummary = profile.categoryMetrics
+  const rankingSummary = categoryMetrics
     .slice(0, 6)
     .map(
       (metric) =>
-        `- ${metric.categoryColumn} by ${metric.metricColumn}: ${metric.topRows
+        `- ${metric.categoryColumn} by ${metric.metricColumn}: ${(metric.topRows ?? [])
           .map((row) => `${row.value}=${row.total}`)
           .join(', ')}`
     )
@@ -321,11 +331,9 @@ export function formatDataProfileForPrompt(profile: DataProfile) {
     metric: '數值指標',
   };
 
-  const businessSummary = profile.businessColumns
-    ? profile.businessColumns
-        .map((column) => `- ${column.name} → ${semanticLabel[column.semantic]}`)
-        .join('\n')
-    : '';
+  const businessSummary = businessColumns
+    .map((column) => `- ${column.name} → ${semanticLabel[column.semantic]}`)
+    .join('\n');
 
   return `資料概況:
 - rows=${profile.rowCount}
