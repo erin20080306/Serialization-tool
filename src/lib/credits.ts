@@ -44,23 +44,17 @@ async function getCookieBalance(): Promise<number> {
 }
 
 // 讀取資料庫餘額；若無該帳號則建立並給予免費點數。
+// 透過 security definer RPC 執行，避免新版 Supabase 金鑰（sb_secret_）缺少
+// 資料表 GRANT 而被 RLS/權限阻擋（403）。
 async function getDbBalance(email: string): Promise<number> {
-  const { data, error } = await supabaseAdmin
-    .from('user_credits')
-    .select('balance')
-    .eq('email', email)
-    .maybeSingle();
+  const { data, error } = await supabaseAdmin.rpc('get_or_init_credits', {
+    p_email: email,
+    p_free: FREE_CREDITS,
+  });
   if (error) throw error;
 
-  if (!data) {
-    const { error: insErr } = await supabaseAdmin
-      .from('user_credits')
-      .insert({ email, balance: FREE_CREDITS });
-    // 23505 = 併發下的唯一鍵衝突，視為已存在，忽略
-    if (insErr && insErr.code !== '23505') throw insErr;
-    return FREE_CREDITS;
-  }
-  return Math.max(0, data.balance ?? 0);
+  const balance = Number(data);
+  return Number.isFinite(balance) ? Math.max(0, balance) : FREE_CREDITS;
 }
 
 export async function getCreditState(): Promise<CreditState> {
