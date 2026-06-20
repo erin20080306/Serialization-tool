@@ -490,15 +490,25 @@ export interface Presentation {
 }
 
 // AI 對每張投影片可指定的圖表種類提示（後端據此填入真實資料）
-type ChartHint = 'ranking' | 'pie' | 'numeric' | 'trend' | 'none';
+type ChartHint =
+  | 'ranking'
+  | 'ranking2'
+  | 'pie'
+  | 'distribution'
+  | 'numeric'
+  | 'count'
+  | 'trend'
+  | 'none';
 
-// 依 profile 產生可用的「真實資料」圖表候選，供投影片掛載。
+// 依 profile 產生多元的「真實資料」圖表候選，供投影片掛載。
 function buildPresentationCharts(profile: DataProfile): Record<ChartHint, PresentationChart | null> {
   const categoryMetrics = Array.isArray(profile.categoryMetrics) ? profile.categoryMetrics : [];
   const columns = Array.isArray(profile.columns) ? profile.columns : [];
 
-  // 分組排行（長條）：取第一個商業分組指標的 Top 列
   const primary = categoryMetrics[0];
+  const secondary = categoryMetrics[1];
+
+  // 分組排行（長條）：第一個商業分組指標的 Top 列（依總計）
   const ranking: PresentationChart | null = primary?.topRows?.length
     ? {
         type: 'bar',
@@ -507,12 +517,48 @@ function buildPresentationCharts(profile: DataProfile): Record<ChartHint, Presen
       }
     : null;
 
-  // 占比（圓餅）：同樣資料以占比呈現
+  // 第二維度排行（長條）：若有第二個分組指標則用之，否則用第一指標的「筆數」維度
+  const ranking2: PresentationChart | null = secondary?.topRows?.length
+    ? {
+        type: 'bar',
+        title: `「${secondary.categoryColumn}」依「${secondary.metricColumn}」排行 Top ${Math.min(secondary.topRows.length, 8)}`,
+        data: secondary.topRows.slice(0, 8).map((r) => ({ label: String(r.value), value: Number(r.total) || 0 })),
+      }
+    : primary?.topRows?.length
+    ? {
+        type: 'bar',
+        title: `「${primary.categoryColumn}」筆數排行 Top ${Math.min(primary.topRows.length, 8)}`,
+        data: primary.topRows.slice(0, 8).map((r) => ({ label: String(r.value), value: Number(r.count) || 0 })),
+      }
+    : null;
+
+  // 占比（圓餅）：第一指標依總計的占比
   const pie: PresentationChart | null = primary?.topRows?.length
     ? {
         type: 'pie',
         title: `「${primary.categoryColumn}」占比（依「${primary.metricColumn}」）`,
         data: primary.topRows.slice(0, 6).map((r) => ({ label: String(r.value), value: Number(r.total) || 0 })),
+      }
+    : null;
+
+  // 分布（圓餅）：挑一個有 topValues 的類別欄位，呈現各類別出現次數分布
+  const catCol = columns.find(
+    (c) => (c.type === 'category' || c.type === 'text') && Array.isArray(c.topValues) && c.topValues.length >= 2
+  );
+  const distribution: PresentationChart | null = catCol?.topValues?.length
+    ? {
+        type: 'pie',
+        title: `「${catCol.name}」分布（依筆數）`,
+        data: catCol.topValues.slice(0, 6).map((t) => ({ label: String(t.value), value: Number(t.count) || 0 })),
+      }
+    : null;
+
+  // 筆數排行（長條）：第一指標各分組的筆數
+  const count: PresentationChart | null = primary?.topRows?.length
+    ? {
+        type: 'bar',
+        title: `「${primary.categoryColumn}」筆數分布 Top ${Math.min(primary.topRows.length, 8)}`,
+        data: primary.topRows.slice(0, 8).map((r) => ({ label: String(r.value), value: Number(r.count) || 0 })),
       }
     : null;
 
@@ -526,12 +572,12 @@ function buildPresentationCharts(profile: DataProfile): Record<ChartHint, Presen
       }
     : null;
 
-  // 趨勢（折線）：若有第二個分組指標可呈現另一維度，否則沿用排行資料
+  // 趨勢（折線）：沿用第一指標資料以折線呈現
   const trend: PresentationChart | null = ranking
     ? { ...ranking, type: 'line', title: ranking.title.replace('排行', '趨勢') }
     : null;
 
-  return { ranking, pie, numeric, trend, none: null };
+  return { ranking, ranking2, pie, distribution, numeric, count, trend, none: null };
 }
 
 // 透過 OpenAI Responses API 的 web_search 工具取得真實的延伸參考/案例。
@@ -592,7 +638,7 @@ const presentationSchema: ResponseSchema = {
           chart: {
             type: SchemaType.STRING,
             format: 'enum',
-            enum: ['ranking', 'pie', 'numeric', 'trend', 'none'],
+            enum: ['ranking', 'ranking2', 'pie', 'distribution', 'numeric', 'count', 'trend', 'none'],
           },
         },
         required: ['heading', 'bullets'],
@@ -621,7 +667,8 @@ export async function generatePresentation(
   columns: string[],
   sampleRows: any[][],
   profile: DataProfile,
-  model?: ModelId
+  model?: ModelId,
+  analysisInsights?: string
 ): Promise<Presentation> {
   const profilePrompt = formatDataProfileForPrompt(profile);
   const sampleData = sampleRows.slice(0, 12).map((row, idx) => ({
@@ -640,16 +687,33 @@ export async function generatePresentation(
   ]
 }
 
-關於 chart 欄位（重要）：
+關於 chart 欄位（重要，請盡量讓圖表多元）：
 - 每張投影片可指定一個圖表類型，系統會自動填入「依完整資料計算的真實數字」，你不需要自己編圖表資料。
-- 可選值：ranking（分組排行長條圖）、pie（占比圓餅圖）、numeric（數值欄位總計比較長條圖）、trend（趨勢折線圖）、none（不放圖）。
-- 請依該頁主題挑選最合適的圖：分組排行頁用 ranking、占比頁用 pie、關鍵指標頁用 numeric、趨勢頁用 trend；封面、結論等純文字頁用 none。
+- 可選值與用途：
+  · ranking（主分組依金額/數值排行，長條）
+  · ranking2（第二維度或筆數排行，長條）
+  · pie（主分組占比，圓餅）
+  · distribution（某類別欄位的筆數分布，圓餅）
+  · numeric（各數值欄位總計比較，長條）
+  · count（各分組筆數分布，長條）
+  · trend（趨勢，折線）
+  · none（純文字頁不放圖）
+- 請讓有圖的投影片「盡量使用不同類型」，避免整份簡報都是同一種圖；至少涵蓋 3 種不同圖型。
+- 依該頁主題挑最合適的圖；封面、結論等純文字頁用 none。
 
 要求：
-- 產生 6~8 張投影片，建議包含：封面摘要、資料概覽、關鍵指標(numeric)、分組排行 Top(ranking)、占比分析(pie)、趨勢與分布(trend)、異常與風險、結論與行動建議。
+- 產生 7~9 張投影片，建議包含：封面摘要、資料概覽、關鍵指標(numeric)、主分組排行 Top(ranking)、第二維度/筆數(ranking2 或 count)、占比與分布(pie 或 distribution)、趨勢(trend)、異常與風險、結論與行動建議。
 - 每張投影片 3~5 個 bullet，務必引用 profile 中的實際數字與欄位名稱，不要空泛。
 - 內容要具體、可行動，像給經營層看的決策簡報。
-- 統計數字以「完整資料」計算的 profile 為準，不要只看樣本。`;
+- 統計數字以「完整資料」計算的 profile 為準，不要只看樣本。
+${
+    analysisInsights
+      ? `
+【重要：請緊扣以下既有分析結論，讓簡報內容與分析報告一致，不要另立新說法】
+${analysisInsights.slice(0, 2000)}
+`
+      : ''
+  }`;
 
   const userPrompt = `欄位：${columns.join(', ')}
 

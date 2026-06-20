@@ -527,7 +527,7 @@ export default function AnalyzePage() {
       const response = await fetch('/api/presentation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ columns: data.columns, profile, sampleRows }),
+        body: JSON.stringify({ columns: data.columns, profile, sampleRows, analysisInsights: analysis?.insights }),
       });
       if (response.ok) {
         const result = await response.json();
@@ -552,13 +552,16 @@ export default function AnalyzePage() {
     if (!presentation) return;
     const esc = (s: string) =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 每張投影片輪替主題色，增加設計層次感
+    const ACCENTS = ['6366F1', '0EA5E9', '8B5CF6', 'EC4899', 'F59E0B', '10B981', 'EF4444', '14B8A6'];
     const slidesHtml = presentation.slides
       .map((s, idx) => {
+        const accent = ACCENTS[idx % ACCENTS.length];
         const chartHtml = s.chart
-          ? `<div class="chart">${buildChartSvg(s.chart)}</div>`
+          ? `<div class="chart">${buildSlideChartSvg(s.chart, accent)}</div>`
           : '';
         const bodyClass = s.chart ? 'body two-col' : 'body';
-        return `<section class="slide">
+        return `<section class="slide" style="--accent:#${accent}">
       <div class="slide-head"><span class="badge">${idx + 1}</span><h2>${esc(s.heading)}</h2></div>
       <div class="${bodyClass}">
         <ul>${s.bullets.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
@@ -571,7 +574,7 @@ export default function AnalyzePage() {
       .join('\n');
     const refsHtml =
       presentation.references && presentation.references.length
-        ? `<section class="slide">
+        ? `<section class="slide" style="--accent:#4338CA">
       <div class="slide-head"><span class="badge">★</span><h2>參考範例與延伸閱讀</h2></div>
       <ul class="refs">${presentation.references
         .map(
@@ -584,37 +587,45 @@ export default function AnalyzePage() {
       <p class="notes">資料來源為網路搜尋結果，僅供延伸參考。</p>
     </section>`
         : '';
+    const dateStr = new Date().toLocaleDateString('zh-Hant');
     const html = `<!DOCTYPE html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(presentation.title)}</title>
 <style>
   *{box-sizing:border-box}
-  body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;margin:0;background:#e9edf5;color:#1f2937}
-  .deck{max-width:1040px;margin:0 auto;padding:28px 16px}
-  .cover{position:relative;aspect-ratio:16/9;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border-radius:16px;padding:64px 60px;display:flex;flex-direction:column;justify-content:center;box-shadow:0 10px 40px rgba(79,70,229,.25);margin-bottom:24px}
-  .cover h1{font-size:44px;line-height:1.2;margin:0 0 16px;font-weight:800}
-  .cover p{font-size:22px;opacity:.92;margin:0}
-  .cover .tag{position:absolute;top:28px;left:60px;font-size:13px;letter-spacing:2px;opacity:.85;text-transform:uppercase}
-  .slide{position:relative;aspect-ratio:16/9;background:#fff;margin:0 0 24px;padding:40px 48px 52px;border-radius:16px;box-shadow:0 6px 24px rgba(15,23,42,.08);overflow:hidden}
-  .slide-head{display:flex;align-items:center;gap:12px;border-bottom:3px solid #eef2ff;padding-bottom:14px;margin-bottom:22px}
-  .slide-head h2{font-size:28px;color:#4338ca;margin:0;font-weight:800}
-  .badge{width:34px;height:34px;border-radius:9px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;flex:0 0 auto}
-  .body{font-size:19px;line-height:1.85}
-  .body.two-col{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center}
-  .body ul{margin:0;padding-left:24px}
-  .body li{margin:6px 0}
-  .chart{background:#f8fafc;border:1px solid #eef2ff;border-radius:12px;padding:10px}
-  .chart svg{width:100%;height:auto;display:block}
-  .notes{margin:18px 0 0;color:#64748b;font-size:14px;font-style:italic}
-  .page-no{position:absolute;right:24px;bottom:16px;color:#cbd5e1;font-size:13px;font-weight:600}
-  .refs{font-size:18px;line-height:1.7}
-  .refs a{color:#4338ca;text-decoration:none;font-weight:600}
+  body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;margin:0;background:#eef1f6;color:#1f2937}
+  .deck{max-width:1080px;margin:0 auto;padding:32px 16px}
+  .cover{position:relative;aspect-ratio:16/9;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 55%,#9333ea 100%);color:#fff;border-radius:20px;padding:72px 64px;display:flex;flex-direction:column;justify-content:center;box-shadow:0 18px 50px rgba(79,70,229,.32);margin-bottom:28px;overflow:hidden}
+  .cover:before{content:"";position:absolute;right:-80px;top:-80px;width:320px;height:320px;border-radius:50%;background:rgba(255,255,255,.12)}
+  .cover:after{content:"";position:absolute;right:60px;bottom:-120px;width:260px;height:260px;border-radius:50%;background:rgba(255,255,255,.08)}
+  .cover .tag{font-size:13px;letter-spacing:3px;opacity:.9;text-transform:uppercase;margin-bottom:18px}
+  .cover h1{font-size:48px;line-height:1.18;margin:0 0 18px;font-weight:800;position:relative;z-index:1}
+  .cover p{font-size:22px;opacity:.94;margin:0;max-width:80%;position:relative;z-index:1}
+  .cover .meta{margin-top:36px;font-size:14px;opacity:.85;position:relative;z-index:1}
+  .slide{position:relative;aspect-ratio:16/9;background:#fff;margin:0 0 28px;padding:44px 52px 56px;border-radius:20px;box-shadow:0 8px 28px rgba(15,23,42,.09);overflow:hidden}
+  .slide:before{content:"";position:absolute;left:0;top:0;bottom:0;width:8px;background:var(--accent)}
+  .slide-head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #eef2f7;padding-bottom:16px;margin-bottom:26px}
+  .slide-head h2{font-size:29px;color:#1e293b;margin:0;font-weight:800}
+  .badge{width:38px;height:38px;border-radius:11px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:17px;flex:0 0 auto;box-shadow:0 4px 12px rgba(0,0,0,.12)}
+  .body{font-size:19px;line-height:1.9}
+  .body.two-col{display:grid;grid-template-columns:1.05fr 1fr;gap:32px;align-items:center}
+  .body ul{margin:0;padding:0;list-style:none}
+  .body li{position:relative;margin:12px 0;padding-left:26px}
+  .body li:before{content:"";position:absolute;left:0;top:11px;width:9px;height:9px;border-radius:3px;background:var(--accent)}
+  .chart{background:#fff;border:1px solid #eef2f7;border-radius:16px;padding:8px;box-shadow:0 4px 16px rgba(15,23,42,.05)}
+  .chart svg{width:100%;height:auto;display:block;border-radius:12px}
+  .notes{margin:18px 0 0;color:#64748b;font-size:14px;font-style:italic;border-top:1px dashed #e2e8f0;padding-top:12px}
+  .page-no{position:absolute;right:28px;bottom:18px;color:#cbd5e1;font-size:13px;font-weight:700}
+  .refs{font-size:18px;line-height:1.7;margin:0;padding:0;list-style:none}
+  .refs li{margin:0 0 14px;padding-left:22px;position:relative}
+  .refs li:before{content:"";position:absolute;left:0;top:9px;width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .refs a{color:#4338ca;text-decoration:none;font-weight:700}
   .refs a:hover{text-decoration:underline}
-  .refs .snip{color:#64748b;font-size:14px;font-weight:400;margin:2px 0 10px}
+  .refs .snip{color:#64748b;font-size:14px;font-weight:400;margin:3px 0 0}
   @media print{body{background:#fff}.deck{padding:0}.slide,.cover{box-shadow:none;page-break-after:always;margin:0;border-radius:0}}
 </style></head>
 <body>
   <div class="deck">
-    <div class="cover"><div class="tag">資料分析簡報</div><h1>${esc(presentation.title)}</h1><p>${esc(presentation.subtitle)}</p></div>
+    <div class="cover"><div class="tag">資料分析簡報 · DATA ANALYSIS</div><h1>${esc(presentation.title)}</h1><p>${esc(presentation.subtitle)}</p><div class="meta">${data?.fileName ? esc(data.fileName) + ' ・ ' : ''}${dateStr} ・ 共 ${presentation.slides.length} 張投影片</div></div>
     ${slidesHtml}
     ${refsHtml}
   </div>
@@ -1570,6 +1581,122 @@ function buildChartSvg(spec: ChartSpec): string {
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#ffffff"/>${header}${body}</svg>`;
+}
+
+// 簡報專用、較具設計感的圖表渲染（不影響聊天使用的 buildChartSvg）。
+// accent 為不含 # 的 hex 主題色，會做漸層與點綴。
+function buildSlideChartSvg(spec: ChartSpec, accent = '6366F1'): string {
+  const W = 720;
+  const H = 440;
+  const PALETTE = ['6366F1', '8B5CF6', 'EC4899', 'F59E0B', '10B981', '3B82F6', 'EF4444', '14B8A6'];
+  const uid = `g${Math.random().toString(36).slice(2, 8)}`;
+  const top = 70;
+  const title = `<text x="28" y="40" font-family="sans-serif" font-size="19" font-weight="800" fill="#1e293b">${escapeXml(
+    truncateLabel(spec.title, 42)
+  )}</text><rect x="28" y="50" width="46" height="4" rx="2" fill="#${accent}"/>`;
+  let body = '';
+  let defs = `<linearGradient id="${uid}bar" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#${accent}"/><stop offset="1" stop-color="#${accent}" stop-opacity="0.55"/></linearGradient>`;
+
+  if (spec.type === 'pie') {
+    const data = spec.data.filter((d) => d.value > 0);
+    const total = data.reduce((s, d) => s + d.value, 0) || 1;
+    const cx = 180;
+    const cy = 250;
+    const r = 120;
+    const ir = 64; // donut 內半徑
+    let cum = 0;
+    const polar = (a: number, rad: number) => {
+      const t = ((a - 90) * Math.PI) / 180;
+      return { x: cx + rad * Math.cos(t), y: cy + rad * Math.sin(t) };
+    };
+    const paths = data
+      .map((d, i) => {
+        const start = (cum / total) * 360;
+        cum += d.value;
+        const end = (cum / total) * 360;
+        const large = end - start > 180 ? 1 : 0;
+        const o1 = polar(start, r);
+        const o2 = polar(end, r);
+        const i1 = polar(end, ir);
+        const i2 = polar(start, ir);
+        const dd =
+          data.length === 1
+            ? `M ${cx - r} ${cy} a ${r} ${r} 0 1 0 ${r * 2} 0 a ${r} ${r} 0 1 0 ${-r * 2} 0 M ${cx - ir} ${cy} a ${ir} ${ir} 0 1 1 ${ir * 2} 0 a ${ir} ${ir} 0 1 1 ${-ir * 2} 0`
+            : `M ${o1.x.toFixed(1)} ${o1.y.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${o2.x.toFixed(1)} ${o2.y.toFixed(1)} L ${i1.x.toFixed(1)} ${i1.y.toFixed(1)} A ${ir} ${ir} 0 ${large} 0 ${i2.x.toFixed(1)} ${i2.y.toFixed(1)} Z`;
+        return `<path d="${dd}" fill="#${PALETTE[i % PALETTE.length]}" stroke="#fff" stroke-width="2"/>`;
+      })
+      .join('');
+    const center = `<text x="${cx}" y="${cy - 4}" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#94a3b8">總計</text><text x="${cx}" y="${cy + 20}" text-anchor="middle" font-family="sans-serif" font-size="20" font-weight="800" fill="#1e293b">${total.toLocaleString()}</text>`;
+    const legend = data
+      .map((d, i) => {
+        const y = 96 + i * 30;
+        const pct = ((d.value / total) * 100).toFixed(1);
+        return (
+          `<rect x="372" y="${y - 12}" width="14" height="14" rx="3" fill="#${PALETTE[i % PALETTE.length]}"/>` +
+          `<text x="394" y="${y}" font-family="sans-serif" font-size="14" fill="#334155">${escapeXml(truncateLabel(d.label, 16))}</text>` +
+          `<text x="${W - 28}" y="${y}" text-anchor="end" font-family="sans-serif" font-size="13" font-weight="700" fill="#0f172a">${pct}%</text>`
+        );
+      })
+      .join('');
+    body = paths + center + legend;
+  } else if (spec.type === 'line') {
+    defs += `<linearGradient id="${uid}area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#${accent}" stop-opacity="0.35"/><stop offset="1" stop-color="#${accent}" stop-opacity="0"/></linearGradient>`;
+    const pad = 60;
+    const plotW = W - pad * 2;
+    const plotH = H - top - 56;
+    const values = spec.data.map((p) => p.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const n = Math.max(spec.data.length - 1, 1);
+    const coords = spec.data.map((p, i) => ({
+      x: pad + (i * plotW) / n,
+      y: top + plotH - ((p.value - min) / range) * plotH,
+    }));
+    const linePath = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(' ');
+    const areaPath = `${linePath} L ${coords[coords.length - 1].x.toFixed(1)} ${top + plotH} L ${coords[0].x.toFixed(1)} ${top + plotH} Z`;
+    const grid = [0, 0.25, 0.5, 0.75, 1]
+      .map((g) => {
+        const y = top + plotH - g * plotH;
+        return `<line x1="${pad}" y1="${y.toFixed(1)}" x2="${W - pad}" y2="${y.toFixed(1)}" stroke="#eef2f7" stroke-width="1"/>`;
+      })
+      .join('');
+    const dots = coords
+      .map((c) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="4" fill="#fff" stroke="#${accent}" stroke-width="2.5"/>`)
+      .join('');
+    const labels = spec.data
+      .map((p, i) =>
+        i % Math.ceil(spec.data.length / 6 || 1) === 0
+          ? `<text x="${coords[i].x.toFixed(1)}" y="${top + plotH + 22}" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#94a3b8">${escapeXml(truncateLabel(p.label, 8))}</text>`
+          : ''
+      )
+      .join('');
+    body =
+      grid +
+      `<path d="${areaPath}" fill="url(#${uid}area)"/>` +
+      `<path d="${linePath}" fill="none" stroke="#${accent}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` +
+      dots +
+      labels;
+  } else {
+    const max = Math.max(...spec.data.map((b) => Math.abs(b.value)), 1);
+    const plotX = 200;
+    const plotW = W - plotX - 110;
+    const rowH = Math.min(40, (H - top - 24) / spec.data.length);
+    body = spec.data
+      .map((b, i) => {
+        const y = top + i * rowH;
+        const bw = Math.max((Math.abs(b.value) / max) * plotW, 3);
+        return (
+          `<text x="28" y="${(y + rowH / 2 + 4).toFixed(1)}" font-family="sans-serif" font-size="13" fill="#475569">${escapeXml(truncateLabel(b.label, 18))}</text>` +
+          `<rect x="${plotX}" y="${(y + 5).toFixed(1)}" width="${plotW}" height="${(rowH - 12).toFixed(1)}" rx="5" fill="#f1f5f9"/>` +
+          `<rect x="${plotX}" y="${(y + 5).toFixed(1)}" width="${bw.toFixed(1)}" height="${(rowH - 12).toFixed(1)}" rx="5" fill="url(#${uid}bar)"/>` +
+          `<text x="${(plotX + bw + 8).toFixed(1)}" y="${(y + rowH / 2 + 4).toFixed(1)}" font-family="sans-serif" font-size="12" font-weight="700" fill="#1e293b">${b.value.toLocaleString()}</text>`
+        );
+      })
+      .join('');
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${defs}</defs><rect width="${W}" height="${H}" rx="14" fill="#ffffff"/>${title}${body}</svg>`;
 }
 
 function triggerDownload(blob: Blob, filename: string) {

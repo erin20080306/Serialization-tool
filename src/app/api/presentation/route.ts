@@ -13,6 +13,8 @@ export async function POST(req: NextRequest) {
     const rows: any[][] | undefined = body.rows;
     const prebuiltProfile: DataProfile | undefined = body.profile;
     const sampleRows: any[][] = body.sampleRows ?? (rows ? rows.slice(0, 12) : []);
+    const analysisInsights: string | undefined =
+      typeof body.analysisInsights === 'string' ? body.analysisInsights : undefined;
 
     if (!columns || (!rows && !prebuiltProfile)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -26,7 +28,7 @@ export async function POST(req: NextRequest) {
     const profile = prebuiltProfile ?? buildDataProfile(columns, rows as any[][]);
 
     try {
-      const presentation = await generatePresentation(columns, sampleRows, profile, model);
+      const presentation = await generatePresentation(columns, sampleRows, profile, model, analysisInsights);
       return NextResponse.json({ presentation, balance: unlimited ? null : balance });
     } catch (e) {
       console.error('Presentation generation error:', e);
