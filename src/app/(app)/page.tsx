@@ -3,8 +3,11 @@
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger,
+} from '@/components/ui/dialog';
 import { 
-  Sparkles, MessageSquare, Calculator, Terminal, ArrowRight, Play
+  Sparkles, MessageSquare, Calculator, Terminal, ArrowRight, Play, Upload, BarChart3
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -47,9 +50,57 @@ export default function LandingPage() {
               進入主控台 <ArrowRight className="w-4 h-4" />
             </Button>
           </Link>
-          <Button size="lg" variant="outline" className="gap-2">
-            <Play className="w-4 h-4" /> 觀看示範
-          </Button>
+          <Dialog>
+            <DialogTrigger render={<Button size="lg" variant="outline" className="gap-2" />}>
+              <Play className="w-4 h-4" /> 觀看示範
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>三步驟操作示範</DialogTitle>
+                <DialogDescription>不需要安裝，上傳資料即可開始。</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-left">
+                <div className="flex items-start gap-4 rounded-xl border border-slate-200 p-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
+                    <Upload className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 font-semibold text-slate-900">
+                      <span className="text-xs text-indigo-600">STEP 1</span> 上傳資料
+                    </div>
+                    <p className="mt-0.5 text-sm text-slate-600">拖曳或選擇 Excel / CSV 檔，或直接連結 Google Sheets。</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4 rounded-xl border border-slate-200 p-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-purple-100 text-purple-600">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 font-semibold text-slate-900">
+                      <span className="text-xs text-purple-600">STEP 2</span> AI 分析
+                    </div>
+                    <p className="mt-0.5 text-sm text-slate-600">用中文提問，AI 自動算統計、找異常並給出商業洞察。</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4 rounded-xl border border-slate-200 p-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                    <BarChart3 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 font-semibold text-slate-900">
+                      <span className="text-xs text-blue-600">STEP 3</span> 產生成果
+                    </div>
+                    <p className="mt-0.5 text-sm text-slate-600">一鍵產出圖表、自動報表，以及 GPT-5.5 簡報（含真實圖表）。</p>
+                  </div>
+                </div>
+              </div>
+              <Link href="/login" className="block">
+                <Button className="w-full gap-2">
+                  進入主控台 <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </DialogContent>
+          </Dialog>
         </div>
 
         <div id="features" className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto text-left">
@@ -84,8 +135,8 @@ export default function LandingPage() {
               </ul>
               <Button variant="outline" className="w-full">開始使用</Button>
             </Card>
-            <Card className="p-6 border-2 border-indigo-500 relative">
-              <Badge className="absolute -top-3 left-1/2 -translate-x-1/2">熱門</Badge>
+            <Card className="p-6 border-2 border-indigo-500 relative overflow-visible">
+              <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 z-10 shadow-sm">熱門</Badge>
               <h3 className="text-lg font-bold mb-2">專業版</h3>
               <div className="text-3xl font-bold mb-4">NT$300<span className="text-sm font-normal text-slate-500">/月</span></div>
               <ul className="space-y-2 text-sm text-slate-600 mb-6">
